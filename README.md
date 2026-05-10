@@ -292,7 +292,7 @@ Total RTO ~50 min. RPO ~30 sec at default 5-min cadence.
 | Why cold DR over active-passive multi-region | `docs/operations/why-cold-dr.md` |
 | Why Velero + EBS Snapshot (and not Restic + LVM as the spec named) | `docs/operations/why-velero-not-restic.md` |
 | **Cost & time estimate methodology** (formulas + AWS pricing URLs for every quantitative claim) | `docs/operations/cost-estimate-methodology.md` |
-| **Automation tiers** — what auto-recovers, what doesn't, what could but doesn't, with 4 real applicable patches | `docs/operations/automation-tiers.md` |
+| **Automation tiers** — what auto-recovers, what doesn't, what could but doesn't, with the four-segment senior matrix per row (detection / mechanism / decision / cost) | `docs/operations/automation-tiers.md` |
 | **Future plan — Restic / Kopia FSB path diff patch** (apply if customer's Stage 3 trade-off arrives there) | `docs/future/restic-fsb-patch.md` |
 | Disaster runbook | `docs/operations/region-failure-recovery.md` |
 | Ownership boundaries (Terraform / Velero / ArgoCD) | `docs/operations/scope-boundaries.md` |
