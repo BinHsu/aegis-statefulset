@@ -10,6 +10,21 @@
 
 ---
 
+## Tier matrix at a glance
+
+<img src="../diagrams/d7-automation-tier-matrix.svg" alt="Three tiers of automation — Tier 1 fully auto / Tier 2 semi-auto by design / Tier 3 manual by design — with the four-segment senior framework (detection / mechanism / decision / cost commitment)" width="100%" />
+
+The three tiers map to the four-segment senior framework (detection /
+mechanism / decision / cost commitment). Tier 1 has all four segments
+auto and is the K8s + AWS managed baseline. Tier 2 has detection +
+mechanism auto but decision + cost human-gated by design — promotion
+to Tier 1 needs the customer's organisation to have solved the gating
+upstream. Tier 3 is principled manual — auto would do the wrong thing
+or would need per-customer ticketing context. Tier 3 → Tier 2
+promotion typically requires a storage-primitive change (LevelDB →
+TiKV); Tier 2 → Tier 1 typically requires the customer's chaos /
+FinOps / audit gates to be already auto.
+
 ## Spec scope vs. architectural assumptions
 
 This doc covers the spec-literal failure-mode set plus a wider set of

@@ -1,0 +1,37 @@
+flowchart LR
+    subgraph T1["Tier 1 — fully auto today"]
+        direction TB
+        T1items["Pod / node failure<br/>image pull retry<br/>HPA / Karpenter<br/>Velero retry<br/>ArgoCD self-heal"]:::tier1
+        T1seg["detection ✓ auto<br/>mechanism ✓ auto<br/>decision ✓ auto<br/>cost ✓ no marginal $"]:::tier1seg
+        T1items --- T1seg
+    end
+
+    subgraph T2["Tier 2 — auto-detect, manual-execute (default)"]
+        direction TB
+        T2items["AZ rotation<br/>region cutover<br/>cell expansion<br/>tenant relocation<br/>PV detach-attach<br/>per-pod disk exhaustion<br/>compaction stall<br/>backup verify-restore"]:::tier2
+        T2seg["detection ✓ auto<br/>mechanism ✓ auto<br/>decision ❌ human<br/>cost ❌ human<br/>(promotion needs both gates auto)"]:::tier2seg
+        T2items --- T2seg
+    end
+
+    subgraph T3["Tier 3 — manual by design"]
+        direction TB
+        T3items["multi-region simultaneous failure<br/>cluster cold-recreate<br/>tenant point-in-time restore<br/>LevelDB MANIFEST corruption<br/>GDPR tenant deletion"]:::tier3
+        T3seg["auto would do the wrong thing<br/>OR<br/>per-customer ticketing context required"]:::tier3seg
+        T3items --- T3seg
+    end
+
+    UpgradeT3T2["Tier 3 → Tier 2 trigger<br/>storage primitive change<br/>(e.g. LevelDB → TiKV)"]:::upgrade
+    UpgradeT2T1["Tier 2 → Tier 1 trigger<br/>customer maturity solved<br/>decision + cost gates"]:::upgrade
+
+    T3 -. promotion path .-> UpgradeT3T2
+    UpgradeT3T2 -.-> T2
+    T2 -. promotion path .-> UpgradeT2T1
+    UpgradeT2T1 -.-> T1
+
+    classDef tier1 fill:#c8e6c9,stroke:#2e7d32,color:#1b5e20,stroke-width:2px
+    classDef tier1seg fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20,font-style:italic
+    classDef tier2 fill:#fff3e0,stroke:#f57c00,color:#bf360c,stroke-width:2px
+    classDef tier2seg fill:#fff8e1,stroke:#f57c00,color:#bf360c,font-style:italic
+    classDef tier3 fill:#ffebee,stroke:#c62828,color:#b71c1c,stroke-width:2px
+    classDef tier3seg fill:#fce4ec,stroke:#c62828,color:#b71c1c,font-style:italic
+    classDef upgrade fill:#e1f5fe,stroke:#0277bd,color:#01579b,stroke-dasharray:5 5

@@ -142,43 +142,58 @@ Full inventory in `helm/aegis-statefulset/values.yaml`.
 
 ## 5. Architecture diagram
 
-```mermaid
-flowchart TB
-    Client["Client"]
+<img src="diagrams/d1-high-level.svg" alt="High-level architecture — eu-central-1 source region with master AZ + warm-standby AZs, eu-west-1 cold DR" width="100%" />
 
-    subgraph Edge["Edge — Route 53 + ALB (regional)"]
-        R53["Route 53 weighted A-record"]
-        ALB["ALB (master region)"]
-    end
+The diagram captures six structural choices on one canvas: (1) single
+master AZ for the stateful tier with AZ-b / AZ-c warm-standby on
+`desired=0`; (2) the three-tier ingress flow ALB → API → Envoy →
+StatefulSet, with the placement-table lookup pinned at the Envoy layer
+so storage backends stay swappable; (3) Velero as backup orchestrator on
+the CSI Snapshot path, with chunks landing in source-region BSL and AWS
+S3 cross-region replication keeping the DR-region BSL fresh; (4) ArgoCD
+deploying every workload from chart + values, no manual `kubectl apply`;
+(5) Karpenter handling stateless capacity while StatefulSet stays pinned
+on the master-AZ node group; (6) cold DR in eu-west-1 with node groups
+at `desired=0`, replicated BSL bucket, and DynamoDB global-tables replica
+waiting for the cutover runbook.
 
-    subgraph MasterAZ["Master AZ (eu-central-1a, default)"]
-        API["API tier — stateless, autoscaled"]
-        Envoy["Envoy mesh — stateless"]
-        SS["StatefulSet pods — 1:1 pod-to-node"]
-        EBS["EBS volumes — Retain, LVM"]
-    end
+### 5a. Three-tier ingress flow (detail)
 
-    subgraph StandbyAZ["Standby AZs (b, c) — desiredSize=0"]
-        StandbyNG["Node groups, scale-on-demand"]
-    end
+<img src="diagrams/d2-3tier-flow.svg" alt="3-tier flow ALB → API → Envoy → StatefulSet" width="100%" />
 
-    subgraph DR["DR region (eu-west-1)"]
-        Velero["Velero restore target"]
-        DRALB["DR ALB (warm)"]
-    end
+ALB does TLS termination + host-routing. API tier handles auth and
+business logic (stateless, autoscaled). Envoy carries the placement-table
+lookup against DynamoDB Global Tables and acts as the blue/green seam for
+the stateful tier. StatefulSet pods are pinned 1:1 to nodes in the master
+AZ. The 6-property contract (atomic CAS, strongly consistent reads,
+multi-AZ durable, low latency, CDC, audit log) is satisfied by DynamoDB
+in the POC; the customer can swap any backend that meets it.
 
-    subgraph Backup["Backup pipeline"]
-        LVM["LVM snapshot"]
-        Restic["Restic"]
-        S3["S3 (versioned, KMS, cross-region replicated)"]
-    end
+### 5b. Backup data flow (detail)
 
-    Client --> R53 --> ALB --> API --> Envoy --> SS --> EBS
-    EBS --> LVM --> Restic --> S3
-    S3 -.cross-region.-> Velero
-    SS -.AZ rotation.-> StandbyNG
-    R53 -.region cutover.-> DRALB
-```
+<img src="diagrams/d3-backup-flow.svg" alt="Backup data flow — fsfreeze + LVM thin snapshot + CSI + Velero + EBS Snapshot + cross-region replication" width="100%" />
+
+The backup pipeline starts at the application-aware preFreeze hook that
+calls `fsfreeze` against `/data` to give LevelDB a stable view; the LVM
+thin snapshot captures the consistent volume; the CSI driver creates a
+VolumeSnapshot CR; Velero orchestrates the EBS Snapshot. Two schedules
+land at different cadences: Schedule A (operational, 5-min, source-region
+only) and Schedule B (DR, 4-hour, source plus cross-region S3 replication
+plus VSL cross-region snapshot copy).
+
+### 5c. Three-tier multi-tenancy isolation (detail)
+
+<img src="diagrams/d5-cell-isolation.svg" alt="Three-tier multi-tenancy isolation — dedicated account vs dedicated VPC vs shared cluster with namespace" width="100%" />
+
+The architecture exposes three isolation tiers per ADR-04. Tier 1
+(dedicated AWS account) is the top-tier regulated boundary — banking,
+health, anything subject to SOC 2 / ISO / HIPAA. Tier 2 (shared account,
+dedicated VPC) is the medium-regulation default — most SaaS workloads
+land here. Tier 3 (shared cluster, namespace + NetworkPolicy + RBAC) is
+sandbox / low-trust only. The anchor sentence — *"compliance is a
+deployment decision, not a runtime check"* — captures the design lever:
+the tier choice happens at provisioning, runtime enforcement is the
+consequence.
 
 **3-tier flow detail:** ALB does TLS termination + routing-by-host. API tier
 handles auth + business logic. Envoy provides east-west traffic shaping
@@ -188,6 +203,8 @@ StatefulSet pods are pinned 1:1 to nodes in the master AZ.
 ---
 
 ## 6. Disaster recovery summary
+
+<img src="diagrams/d4-dr-three-paths.svg" alt="DR cutover three paths — Path A EBS intact, Path B routing lost pods intact, Path C region failure" width="100%" />
 
 Three failure shapes, three paths, each with named RPO / RTO.
 

@@ -5,6 +5,8 @@
 > stateful applications on single-master-AZ Kubernetes with cold DR via Velero,
 > Strangler-Fig migration support, and observability built in.
 
+<img src="docs/diagrams/d1-high-level.svg" alt="High-level architecture — eu-central-1 source region with master AZ + warm-standby AZs, eu-west-1 cold DR, Velero backup pipeline, ArgoCD GitOps, observability stack" width="100%" />
+
 ---
 
 ## Grounding — current public commitments vs spec target vs what this delivers

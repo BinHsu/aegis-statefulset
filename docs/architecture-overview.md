@@ -33,54 +33,29 @@ over-delivery to expose the curve, not hit the floor.
 
 ## The diagram
 
-```
-                       ┌────────────────────────────────────────┐
-                       │  Region (eu-central-1, default master) │
-                       │                                          │
-                       │  ┌──────────────────────────────────┐    │
-                       │  │  master AZ — eu-central-1a       │    │
-                       │  │                                   │    │
-   client ──TLS──▶ ALB ─┼─▶ api-tier  (nginx forwarder, autoscale) │
-                       │  │      │                            │    │
-                       │  │      ▼                            │    │
-                       │  │   envoy   (Lua filter, placement  │    │
-                       │  │     │      table lookup, 3-mode   │    │
-                       │  │     │      cache invalidation)    │    │
-                       │  │     ▼                              │    │
-                       │  │ aegis-app StatefulSet  pod-0       │    │
-                       │  │   ├─ /data/<tenant>/leveldb        │    │
-                       │  │   └─ EBS PVC (Retain, LVM-managed) │    │
-                       │  │                                     │    │
-                       │  │ velero schedule  (every 5 min)      │    │
-                       │  │   └─ EBS Snapshot ──┐                │    │
-                       │  └─────────────────────┼────────────────┘    │
-                       │                        │                      │
-                       │  ┌────────────────────▼────────────────┐    │
-                       │  │  warm-standby AZ — eu-central-1b    │    │
-                       │  │  (subnet + NAT + node group         │    │
-                       │  │   desiredSize=0, scales on rotate)  │    │
-                       │  └──────────────────────────────────────┘    │
-                       │                                                │
-                       │  ┌──────────────────────────────────────┐    │
-                       │  │  warm-standby AZ — eu-central-1c     │    │
-                       │  │  (subnet + NAT + node group          │    │
-                       │  │   desiredSize=0, scales on rotate)   │    │
-                       │  └──────────────────────────────────────┘    │
-                       │                                                │
-                       │  DynamoDB Global Tables — placement table     │
-                       │  (atomic CAS, strong reads, 6-property        │
-                       │   contract per ADR-03)                        │
-                       └────────────────────────────────────────────────┘
-                                         │
-                                         │  DLM cross-region copy
-                                         ▼
-                       ┌────────────────────────────────────────┐
-                       │  DR region (eu-west-1)                  │
-                       │  EBS Snapshot (Glacier IR)              │
-                       │  S3 (Velero metadata, cross-replicated) │
-                       │  Cold; bootstraps in ~25 min on declare │
-                       └────────────────────────────────────────┘
-```
+<img src="diagrams/d1-high-level.svg" alt="High-level architecture — eu-central-1 source region with master AZ + warm-standby AZs, eu-west-1 cold DR" width="100%" />
+
+### Multi-tenancy isolation tiers (per ADR-04)
+
+<img src="diagrams/d5-cell-isolation.svg" alt="Three-tier multi-tenancy isolation — dedicated AWS account / dedicated VPC / shared cluster + namespace" width="100%" />
+
+The three isolation tiers map directly to compliance posture: Tier 1
+(dedicated account) for top-tier regulated workloads, Tier 2 (dedicated
+VPC) for the medium-regulation default, Tier 3 (shared cluster +
+namespace) for sandbox / low-trust. The tier choice is a deployment
+decision; runtime enforcement is the consequence.
+
+### Strangler-Fig migration sequence (per ADR-05)
+
+<img src="diagrams/d6-strangler-fig.svg" alt="Strangler Fig migration via Target Group Binding — 4 phases from parallel infra to legacy decommission" width="100%" />
+
+The migration substrate change happens at the infrastructure layer.
+Phase 1 provisions parallel EKS infra alongside the legacy EC2 service.
+Phase 2 verifies the shadow with read-only probes. Phase 3 flips traffic
+gradually via TargetGroupBinding weights — 90/10, 50/50, 0/100 — with
+soak-window monitoring at each step. Phase 4 decommissions legacy. The
+anchor — *"the application should not need to know it's being migrated"*
+— captures the design lever: cutover lives at the routing layer.
 
 ## Why each piece earns its place
 

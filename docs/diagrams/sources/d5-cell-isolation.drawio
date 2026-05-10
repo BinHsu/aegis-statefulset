@@ -1,0 +1,118 @@
+<mxfile host="app.diagrams.net" agent="hand-written" version="30.0.0">
+  <diagram id="d5-cell-isolation" name="Three-tier multi-tenancy isolation">
+    <mxGraphModel dx="1422" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="Three-tier multi-tenancy isolation&#10;(per ADR-04 — compliance is a deployment decision, not a runtime check)" style="text;html=1;align=center;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="20" width="1200" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ============================================ -->
+        <!-- Tier 1 — Dedicated AWS Account (top-tier)    -->
+        <!-- ============================================ -->
+        <mxCell id="tier1-region" value="Tier 1 — dedicated AWS Account&#10;(top-tier regulated · banking · health)" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=12;fontStyle=1;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_account;strokeColor=#CD2264;fillColor=none;verticalAlign=top;align=left;spacingLeft=30;fontColor=#CD2264;dashed=0;" vertex="1" parent="1">
+          <mxGeometry x="80" y="100" width="400" height="600" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t1-vpc" value="VPC (dedicated)" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=11;fontStyle=1;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_vpc;strokeColor=#248814;fillColor=none;verticalAlign=top;align=left;spacingLeft=30;fontColor=#248814;dashed=0;" vertex="1" parent="1">
+          <mxGeometry x="120" y="160" width="320" height="500" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t1-eks" value="EKS — single tenant cluster" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#E7157B;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.elastic_kubernetes_service;" vertex="1" parent="1">
+          <mxGeometry x="160" y="220" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t1-rds" value="RDS Aurora&#10;(dedicated)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#3334B9;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.rds;" vertex="1" parent="1">
+          <mxGeometry x="320" y="220" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t1-ebs" value="EBS&#10;(per-tenant CMK)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#7AA116;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.elastic_block_store;" vertex="1" parent="1">
+          <mxGeometry x="160" y="340" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t1-iam" value="IAM&#10;(account-isolated)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#DD344C;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.identity_and_access_management;" vertex="1" parent="1">
+          <mxGeometry x="320" y="340" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t1-sec" value="GuardDuty + CloudTrail&#10;(account-scoped)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fce4ec;strokeColor=#c62828;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="160" y="460" width="220" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t1-summary" value="Isolation: account boundary&#10;Blast radius: this tenant only&#10;Compliance: SOC 2 / ISO / HIPAA-ready&#10;Cost: high · Complexity: low" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#c62828;fontSize=10;fontStyle=0;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="160" y="540" width="220" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- ============================================ -->
+        <!-- Tier 2 — Dedicated VPC (medium tier)         -->
+        <!-- ============================================ -->
+        <mxCell id="tier2-account" value="Tier 2 — shared AWS Account · dedicated VPC&#10;(medium-regulation · network-layer isolation)" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=12;fontStyle=1;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_account;strokeColor=#F09226;fillColor=none;verticalAlign=top;align=left;spacingLeft=30;fontColor=#F09226;dashed=0;" vertex="1" parent="1">
+          <mxGeometry x="500" y="100" width="400" height="600" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t2-vpc-a" value="VPC A — tenant cluster A" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=10;fontStyle=1;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_vpc;strokeColor=#248814;fillColor=none;verticalAlign=top;align=left;spacingLeft=20;fontColor=#248814;dashed=0;" vertex="1" parent="1">
+          <mxGeometry x="540" y="160" width="320" height="200" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t2-eks-a" value="EKS A" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#E7157B;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.elastic_kubernetes_service;" vertex="1" parent="1">
+          <mxGeometry x="580" y="210" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="t2-ebs-a" value="EBS&#10;(per-tenant CMK)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#7AA116;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.elastic_block_store;" vertex="1" parent="1">
+          <mxGeometry x="700" y="210" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t2-vpc-b" value="VPC B — tenant cluster B" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=10;fontStyle=1;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_vpc;strokeColor=#248814;fillColor=none;verticalAlign=top;align=left;spacingLeft=20;fontColor=#248814;dashed=0;" vertex="1" parent="1">
+          <mxGeometry x="540" y="380" width="320" height="160" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t2-eks-b" value="EKS B" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#E7157B;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.elastic_kubernetes_service;" vertex="1" parent="1">
+          <mxGeometry x="580" y="420" width="60" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="t2-ebs-b" value="EBS B" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#7AA116;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.elastic_block_store;" vertex="1" parent="1">
+          <mxGeometry x="700" y="420" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t2-summary" value="Isolation: VPC + KMS CMK + IAM role&#10;Blast radius: VPC peering would be needed (none by default)&#10;Compliance: most SaaS regulated workloads&#10;Cost: medium · Complexity: medium" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#f57c00;fontSize=10;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="540" y="560" width="320" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- ============================================ -->
+        <!-- Tier 3 — Shared cluster (lowest tier)        -->
+        <!-- ============================================ -->
+        <mxCell id="tier3-account" value="Tier 3 — shared cluster&#10;(sandbox · low-trust · feature-flagged isolation)" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=12;fontStyle=1;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_account;strokeColor=#147EBA;fillColor=none;verticalAlign=top;align=left;spacingLeft=30;fontColor=#147EBA;dashed=0;" vertex="1" parent="1">
+          <mxGeometry x="920" y="100" width="400" height="600" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t3-vpc" value="VPC (shared)" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=10;fontStyle=1;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_vpc;strokeColor=#248814;fillColor=none;verticalAlign=top;align=left;spacingLeft=20;fontColor=#248814;dashed=0;" vertex="1" parent="1">
+          <mxGeometry x="960" y="160" width="320" height="380" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t3-eks" value="EKS (shared cluster)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#E7157B;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.elastic_kubernetes_service;" vertex="1" parent="1">
+          <mxGeometry x="1090" y="200" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t3-ns-a" value="namespace tenant-a&#10;NetworkPolicy + RBAC + LimitRange&#10;feature flags A" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#1976d2;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="980" y="290" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="t3-ns-b" value="namespace tenant-b&#10;NetworkPolicy + RBAC + LimitRange&#10;feature flags B" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#1976d2;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="980" y="370" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="t3-ns-c" value="namespace tenant-c&#10;NetworkPolicy + RBAC + LimitRange&#10;feature flags C" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#1976d2;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="980" y="450" width="260" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t3-summary" value="Isolation: K8s namespace + NetworkPolicy + RBAC&#10;Blast radius: shared cluster — namespace is a soft boundary&#10;Compliance: dev / sandbox / low-trust only&#10;Cost: low · Complexity: high (per-tenant policy)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1f5fe;strokeColor=#0277bd;fontSize=10;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="960" y="560" width="320" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Footer anchor sentence -->
+        <mxCell id="anchor" value="Anchor — &quot;Compliance is a deployment decision, not a runtime check.&quot;&#10;The tier choice happens at provisioning. Runtime isolation enforcement is the consequence, not the design lever." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffde7;strokeColor=#f9a825;fontSize=11;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="80" y="730" width="1240" height="60" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

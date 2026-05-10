@@ -1,0 +1,33 @@
+sequenceDiagram
+    autonumber
+    actor Op as Operator
+    participant EC2 as Legacy EC2 service
+    participant TG as ALB Target Group plus TGB
+    participant App as Application
+    participant EKS as EKS StatefulSet
+    participant Velero as Velero
+
+    Note over Op,Velero: Phase 1 — provision parallel infra
+    Op->>EKS: helm install cell N replica
+    EKS-->>Op: pods Running and PVCs bound
+    Op->>Velero: trigger snapshot from EC2-side LVM
+    Velero->>EKS: restore PV data into EBS volumes
+    Note right of Velero: Source-of-truth still EC2 — EKS is shadow-warm
+
+    Note over Op,Velero: Phase 2 — verify shadow
+    Op->>EKS: read-only verification probes
+    EKS-->>Op: data parity confirmed
+
+    Note over Op,Velero: Phase 3 — traffic flip via TGB
+    Op->>TG: Update TargetGroupBinding weight 90 EC2 to 10 EKS
+    TG->>App: routes 10 percent to EKS pods
+    Note right of App: Application sees no change. Same DNS, same auth, same ALB
+    Op->>TG: Increment to 50 EC2 to 50 EKS
+    Op->>TG: Increment to 0 EC2 to 100 EKS
+    Note right of TG: Soak window — monitor delta-replay and RPO
+
+    Note over Op,Velero: Phase 4 — decommission legacy
+    Op->>EC2: drain connections
+    Op->>EC2: terminate instances and release EBS
+
+    Note over Op,Velero: Anchor — application should not need to know it is being migrated

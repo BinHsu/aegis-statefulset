@@ -1,0 +1,26 @@
+flowchart LR
+    Client(["Customer<br/>(stateful + stateless<br/>traffic)"]):::external
+    R53["Route 53<br/>weighted A-records<br/>+ health checks"]:::edge
+    ALB["Application Load Balancer<br/>TLS termination<br/>host routing"]:::edge
+
+    subgraph cluster["EKS cluster — master AZ"]
+        direction TB
+        API["API tier<br/>auth · business logic<br/>(stateless · HPA)"]:::compute
+        Envoy["Envoy mesh<br/>east-west · retries · circuit breaks<br/>placement-table lookup"]:::compute
+        SS["StatefulSet pods<br/>LevelDB · 1:1 pod-to-node<br/>2 TB EBS each"]:::stateful
+    end
+
+    DynDB[("DynamoDB Global Tables<br/>placement table<br/>tenant → pod ordinal")]:::data
+
+    Client -->|HTTPS| R53
+    R53 -->|DNS| ALB
+    ALB -->|HTTP/2| API
+    API -->|gRPC / HTTP| Envoy
+    Envoy -->|HTTP| SS
+    Envoy -.->|"6-property contract"| DynDB
+
+    classDef external fill:#f5f5f5,stroke:#666,color:#333
+    classDef edge fill:#e8f4fd,stroke:#1a73e8,color:#1a3a5f
+    classDef compute fill:#e3f2fd,stroke:#1976d2,color:#0d47a1
+    classDef stateful fill:#fff3e0,stroke:#f57c00,color:#bf360c,stroke-width:3px
+    classDef data fill:#e0f2f1,stroke:#00695c,color:#004d40
