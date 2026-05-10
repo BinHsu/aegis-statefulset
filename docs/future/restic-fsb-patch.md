@@ -218,6 +218,26 @@ cd infrastructure/terraform && terraform apply
 helm upgrade --install aegis-app helm/aegis-statefulset/ -n aegis-app
 ```
 
+### CI freshness check scope (upstream publishing discipline, not customer gate)
+
+The CI step at `.github/workflows/pr-validation.yml` validates this patch
+applies cleanly against the canonical repo state — keeping the patch fresh
+as the chart evolves. This is **upstream publishing discipline**, not a
+customer-side gate.
+
+Customers who apply this patch in their own deployment do **not** need to
+disable the CI. The check uses idempotent `git apply --reverse` auto-detection:
+if the patch is already applied in the customer's tree, the CI step records
+*"notice: patch is downstream-applied, skipping forward-apply check"* and
+exits cleanly. Forward-apply check only fires when the patch is in its
+unapplied state.
+
+Operator workflow:
+- **Upstream side** (this repo): CI fails if chart drift breaks the patch —
+  fix the patch source via `recountdiff` or update against new chart structure.
+- **Downstream side** (customer's fork after applying): CI auto-detects
+  applied state and skips the check. No manual disable needed.
+
 ---
 
 ## 6. Post-flip operational notes

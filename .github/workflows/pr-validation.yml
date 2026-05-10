@@ -118,6 +118,32 @@ jobs:
         with:
           working_directory: infrastructure/terraform
 
+      - name: Restic-FSB patch drift detection (A15) — upstream publishing discipline
+        run: |
+          set -e
+          patch="docs/future/restic-fsb-patch/restic-fsb.patch"
+
+          # Idempotent: if patch already applied (downstream fork state), skip forward-apply check
+          if git apply --reverse --check "$patch" 2>/dev/null; then
+            echo "::notice::Patch is downstream-applied. Skipping forward-apply check."
+            exit 0
+          fi
+
+          # Forward-apply check (upstream-side drift detection)
+          if ! git apply --check "$patch" 2>/dev/null; then
+            echo "::error::restic-fsb.patch no longer applies cleanly. Run 'recountdiff' to fix hunk headers, or update patch source if chart drifted."
+            exit 1
+          fi
+
+          # Apply + run static analysis to verify post-apply correctness
+          git apply "$patch"
+          terraform -chdir=infrastructure/terraform validate -no-color
+          helm lint helm/aegis-statefulset/
+
+          # Revert (preserve docs/future/ patch source)
+          git checkout -- helm/ infrastructure/
+          echo "::notice::Patch is fresh and passes static analysis."
+
       - name: ShellCheck on shell scripts
         run: |
           set -euo pipefail
