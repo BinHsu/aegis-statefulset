@@ -68,6 +68,19 @@ Failover detection: 50% unhealthy / 2 min sustained — reactive, sensitive. Rec
 
 ---
 
+## Operational overhead awareness
+
+The architecture ships maintenance surface — and acknowledges it on its own
+terms. Three tools to operate (Velero / EBS Snapshot / ArgoCD), six runbooks
+for human-side operations, ten thematic ADRs (originally split across fifty
+private predecessors), pre-commit's five-check enforcement gate, and a CI
+surface of four primary workflows plus four supporting. This is the senior
+platform-engineering job in audit-grade SaaS — not a side-effect to apologise
+for. Full breakdown plus the small-platform-team carrying-capacity argument
+in [`docs/SUBMISSION.md` § 7a](docs/SUBMISSION.md#7a-operational-overhead--honest-accounting).
+
+---
+
 ## Quick start
 
 ```bash

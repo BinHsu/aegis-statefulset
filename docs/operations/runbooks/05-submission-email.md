@@ -125,7 +125,16 @@ What I'd flag for the conversation:
      during the technical interview, that's where I have the most receipts
      to share.
 
-  5. Two questions where I'd want a Stage 3 conversation rather than
+  5. Operational overhead is named on its own terms (per spec evaluation
+     criterion #5). The architecture ships three tools to operate
+     (Velero / EBS Snapshot / ArgoCD), six runbooks, ten thematic ADRs,
+     a five-check pre-commit gate, and a CI surface of four primary
+     workflows plus four supporting. SUBMISSION.md § 7a gives the full
+     breakdown plus the carrying-capacity argument for a small platform
+     team — the overhead is the senior platform-engineering job, not
+     a side-effect.
+
+  6. Two questions where I'd want a Stage 3 conversation rather than
      pre-deciding:
        • LDB layout — Pattern 1 (shared LDB with key prefix) vs Pattern
          2 (per-tenant folder). Capability matrix in ADR-04. The POC
