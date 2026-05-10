@@ -259,7 +259,7 @@ diff --git a/infrastructure/lambda/auto-region-cutover/index.py b/infrastructure
 new file mode 100644
 --- /dev/null
 +++ b/infrastructure/lambda/auto-region-cutover/index.py
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,84 @@
 +# AEGIS-PATCH-ANCHOR: auto-region-cutover
 +"""
 +Lambda body for auto-region-cutover triggered by Route 53 health-check
@@ -290,6 +290,7 @@ new file mode 100644
 +log = logging.getLogger()
 +log.setLevel(os.getenv("LOG_LEVEL", "INFO"))
 +
++# PRODUCTION-TUNE-REQUIRED: validate DR_REGION / DR_CLUSTER_NAME / VELERO_BSL_BUCKET / LATEST_BACKUP_TAG match deployed DR cluster
 +DR_REGION = os.environ["DR_REGION"]
 +DR_CLUSTER = os.environ["DR_CLUSTER_NAME"]
 +VELERO_BSL = os.environ["VELERO_BSL_BUCKET"]

@@ -243,7 +243,7 @@ new file mode 100644
 +    log.info("cell-expander started; namespace=%s, threshold=%.0f%%", NAMESPACE, THRESHOLD_PCT)
 +    while True:
 +        reset_daily_counter()
-+        for cell_id in [f"cell-{i}" for i in range(0, 100)]: # bounded scan
++        # PRODUCTION-TUNE-REQUIRED: replace bounded scan with K8s API listing of StatefulSet pod ordinals
 +            usage = metric_for_cell(cell_id)
 +            if usage > THRESHOLD_PCT:
 +                if _today_expansions >= MAX_CELLS_PER_DAY:

@@ -117,7 +117,7 @@ diff --git a/infrastructure/lambda/relocation-controller/relocator.py b/infrastr
 new file mode 100644
 --- /dev/null
 +++ b/infrastructure/lambda/relocation-controller/relocator.py
-@@ -0,0 +1,115 @@
+@@ -0,0 +1,116 @@
 +# AEGIS-PATCH-ANCHOR: auto-tenant-relocation
 +"""
 +Relocation controller — runs as CronJob in customer's maintenance window.
@@ -180,6 +180,7 @@ new file mode 100644
 +    candidates = [c for c in all_cells if c != source_cell]
 +    if not candidates:
 +        return None
++    # PRODUCTION-TUNE-REQUIRED: replace candidates[0] with customer's bin-packing policy (per-cell totals + IOPS + budget headroom)
 +    # In production, look up per-cell totals; this is the placeholder skeleton
 +    return candidates[0]
 +

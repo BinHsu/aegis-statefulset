@@ -220,7 +220,7 @@ diff --git a/infrastructure/lambda/auto-az-rotation/index.py b/infrastructure/la
 new file mode 100644
 --- /dev/null
 +++ b/infrastructure/lambda/auto-az-rotation/index.py
-@@ -0,0 +1,140 @@
+@@ -0,0 +1,141 @@
 +# AEGIS-PATCH-ANCHOR: auto-az-rotation
 +"""
 +Lambda body for auto-AZ-rotation triggered by EventBridge on ALB
@@ -260,6 +260,7 @@ new file mode 100644
 +SCRIPT_BUCKET = os.environ["ROTATION_SCRIPT_S3_BUCKET"]
 +SCRIPT_KEY = os.environ["ROTATION_SCRIPT_S3_KEY"]
 +COOLDOWN_HOURS = int(os.environ.get("COOLDOWN_HOURS", "6"))
++# PRODUCTION-TUNE-REQUIRED: set PROMETHEUS_FEDERATION_URL or rotation defaults to no-op (conservative)
 +PROM_URL = os.environ.get("PROMETHEUS_FEDERATION_URL", "")
 +
 +ssm = boto3.client("ssm")
