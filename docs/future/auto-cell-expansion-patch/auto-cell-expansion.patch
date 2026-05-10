@@ -31,7 +31,8 @@ diff --git a/helm/aegis-statefulset/templates/cell-expander-controller.yaml b/he
 new file mode 100644
 --- /dev/null
 +++ b/helm/aegis-statefulset/templates/cell-expander-controller.yaml
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,102 @@
++# AEGIS-PATCH-ANCHOR: auto-cell-expansion
 +# Cell-expander custom controller — auto-provisions new cells when
 +# tenant_storage_bytes crosses threshold AND budget headroom available.
 +#
@@ -42,14 +43,14 @@ new file mode 100644
 +#
 +# Disabled by default (capacity.auto_expansion.enabled = false).
 +
-+{{- if .Values.capacity.auto_expansion.enabled }}
++{{- if .Values.auto_cell_expansion.enabled }}
 +apiVersion: v1
 +kind: ServiceAccount
 +metadata:
 +  name: cell-expander
 +  namespace: {{ .Release.Namespace }}
 +  annotations:
-+    eks.amazonaws.com/role-arn: {{ .Values.capacity.auto_expansion.iam_role_arn }}
++    eks.amazonaws.com/role-arn: {{ .Values.auto_cell_expansion.iam_role_arn }}
 +---
 +apiVersion: rbac.authorization.k8s.io/v1
 +kind: ClusterRole
@@ -105,17 +106,17 @@ new file mode 100644
 +          type: RuntimeDefault
 +      containers:
 +        - name: expander
-+          image: {{ .Values.capacity.auto_expansion.image.repository }}:{{ .Values.capacity.auto_expansion.image.tag }}@{{ .Values.capacity.auto_expansion.image.digest }}
++          image: {{ .Values.auto_cell_expansion.image.repository }}:{{ .Values.auto_cell_expansion.image.tag }}@{{ .Values.auto_cell_expansion.image.digest }}
 +          imagePullPolicy: IfNotPresent
 +          env:
 +            - name: NAMESPACE
 +              value: {{ .Release.Namespace }}
 +            - name: BUDGET_CHECK_URL
-+              value: {{ .Values.capacity.auto_expansion.budget_check_url | quote }}
++              value: {{ .Values.auto_cell_expansion.budget_check_url | quote }}
 +            - name: THRESHOLD_PCT
-+              value: {{ .Values.capacity.auto_expansion.threshold_pct | quote }}
++              value: {{ .Values.auto_cell_expansion.threshold_pct | quote }}
 +            - name: MAX_CELLS_PER_DAY
-+              value: {{ .Values.capacity.auto_expansion.max_cells_per_day | quote }}
++              value: {{ .Values.auto_cell_expansion.max_cells_per_day | quote }}
 +            - name: APPSET_NAME
 +              value: aegis-statefulset
 +            - name: LOG_LEVEL
@@ -137,7 +138,8 @@ diff --git a/infrastructure/lambda/cell-expander/expander.py b/infrastructure/la
 new file mode 100644
 --- /dev/null
 +++ b/infrastructure/lambda/cell-expander/expander.py
-@@ -0,0 +1,119 @@
+@@ -0,0 +1,120 @@
++# AEGIS-PATCH-ANCHOR: auto-cell-expansion
 +"""
 +Cell-expander controller body.
 +
@@ -261,7 +263,8 @@ diff --git a/infrastructure/terraform/iam-cell-expander.tf b/infrastructure/terr
 new file mode 100644
 --- /dev/null
 +++ b/infrastructure/terraform/iam-cell-expander.tf
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,48 @@
++# AEGIS-PATCH-ANCHOR: auto-cell-expansion
 +# IRSA role for cell-expander controller. Allows EKS cluster API access
 +# scoped to the cell-expander ServiceAccount in the application namespace.
 +
@@ -309,3 +312,27 @@ new file mode 100644
 +  default     = false
 +  description = "If true, IAM resources for cell-expander controller are provisioned. See docs/operations/automation-tiers.md § 2c."
 +}
+diff --git a/helm/aegis-statefulset/values.yaml b/helm/aegis-statefulset/values.yaml
+--- a/helm/aegis-statefulset/values.yaml
++++ b/helm/aegis-statefulset/values.yaml
+@@ -266,3 +266,20 @@
+ networkPolicy:
+   enabled: true
+   default_deny: true
++
++# ====================================================================
++# Auto cell expansion — patch source: docs/future/auto-cell-expansion-patch/
++# Per docs/operations/automation-tiers.md § 2c.
++# Disabled by default. Enable only after Stage 3 budget-webhook is wired.
++# To rip out: grep -rln auto_cell_expansion (template + tf + values + patch).
++# ====================================================================
++auto_cell_expansion:
++  enabled: false
++  iam_role_arn: ""
++  budget_check_url: ""
++  threshold_pct: 80
++  max_cells_per_day: 2
++  image:
++    repository: ""
++    tag: ""
++    digest: ""

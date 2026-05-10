@@ -32,7 +32,8 @@ diff --git a/infrastructure/terraform/lambda-auto-az-rotation.tf b/infrastructur
 new file mode 100644
 --- /dev/null
 +++ b/infrastructure/terraform/lambda-auto-az-rotation.tf
-@@ -0,0 +1,165 @@
+@@ -0,0 +1,183 @@
++# AEGIS-PATCH-ANCHOR: auto-az-rotation
 +# Auto-trigger AZ rotation via Lambda + EventBridge.
 +#
 +# Per docs/operations/automation-tiers.md § 2a — flips Tier 2 (semi-auto)
@@ -219,7 +220,8 @@ diff --git a/infrastructure/lambda/auto-az-rotation/index.py b/infrastructure/la
 new file mode 100644
 --- /dev/null
 +++ b/infrastructure/lambda/auto-az-rotation/index.py
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,140 @@
++# AEGIS-PATCH-ANCHOR: auto-az-rotation
 +"""
 +Lambda body for auto-AZ-rotation triggered by EventBridge on ALB
 +health degradation.

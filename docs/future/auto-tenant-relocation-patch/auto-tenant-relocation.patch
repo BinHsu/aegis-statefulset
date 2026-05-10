@@ -27,7 +27,8 @@ diff --git a/helm/aegis-statefulset/templates/relocation-controller.yaml b/helm/
 new file mode 100644
 --- /dev/null
 +++ b/helm/aegis-statefulset/templates/relocation-controller.yaml
-@@ -0,0 +1,84 @@
+@@ -0,0 +1,85 @@
++# AEGIS-PATCH-ANCHOR: auto-tenant-relocation
 +# Per-tenant relocation controller — auto-schedules hot-tenant moves
 +# during the customer-specified maintenance window.
 +#
@@ -35,7 +36,7 @@ new file mode 100644
 +# enable only when customer's hot-tenant frequency justifies + tenants
 +# tolerate brief unavailability during maintenance.
 +
-+{{- if .Values.relocation.auto_trigger.enabled }}
++{{- if .Values.auto_tenant_relocation.enabled }}
 +apiVersion: v1
 +kind: ServiceAccount
 +metadata:
@@ -75,7 +76,7 @@ new file mode 100644
 +  name: relocation-controller
 +  namespace: {{ .Release.Namespace }}
 +spec:
-+  schedule: {{ .Values.relocation.auto_trigger.maintenance_window | quote }}
++  schedule: {{ .Values.auto_tenant_relocation.maintenance_window | quote }}
 +  jobTemplate:
 +    spec:
 +      template:
@@ -89,14 +90,14 @@ new file mode 100644
 +              type: RuntimeDefault
 +          containers:
 +            - name: relocator
-+              image: {{ .Values.relocation.auto_trigger.image.repository }}:{{ .Values.relocation.auto_trigger.image.tag }}@{{ .Values.relocation.auto_trigger.image.digest }}
++              image: {{ .Values.auto_tenant_relocation.image.repository }}:{{ .Values.auto_tenant_relocation.image.tag }}@{{ .Values.auto_tenant_relocation.image.digest }}
 +              env:
 +                - name: NAMESPACE
 +                  value: {{ .Release.Namespace }}
 +                - name: HOT_TENANT_THRESHOLD_PCT
-+                  value: {{ .Values.relocation.auto_trigger.hot_threshold_pct | quote }}
++                  value: {{ .Values.auto_tenant_relocation.hot_threshold_pct | quote }}
 +                - name: MAX_RELOCATIONS_PER_WINDOW
-+                  value: {{ .Values.relocation.auto_trigger.max_per_window | quote }}
++                  value: {{ .Values.auto_tenant_relocation.max_per_window | quote }}
 +                - name: LOG_LEVEL
 +                  value: INFO
 +              resources:
@@ -116,7 +117,8 @@ diff --git a/infrastructure/lambda/relocation-controller/relocator.py b/infrastr
 new file mode 100644
 --- /dev/null
 +++ b/infrastructure/lambda/relocation-controller/relocator.py
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,115 @@
++# AEGIS-PATCH-ANCHOR: auto-tenant-relocation
 +"""
 +Relocation controller — runs as CronJob in customer's maintenance window.
 +Identifies hot tenants from per-tenant metrics ConfigMap; schedules
@@ -231,3 +233,26 @@ new file mode 100644
 +
 +if __name__ == "__main__":
 +    main()
+diff --git a/helm/aegis-statefulset/values.yaml b/helm/aegis-statefulset/values.yaml
+--- a/helm/aegis-statefulset/values.yaml
++++ b/helm/aegis-statefulset/values.yaml
+@@ -266,3 +266,19 @@
+ networkPolicy:
+   enabled: true
+   default_deny: true
++
++# ====================================================================
++# Auto tenant relocation — patch source: docs/future/auto-tenant-relocation-patch/
++# Per docs/operations/automation-tiers.md § 2d.
++# Disabled by default. Enable only when hot-tenant frequency justifies.
++# To rip out: grep -rln auto_tenant_relocation (template + values + patch).
++# ====================================================================
++auto_tenant_relocation:
++  enabled: false
++  maintenance_window: "0 3 * * 0"
++  hot_threshold_pct: 70
++  max_per_window: 3
++  image:
++    repository: ""
++    tag: ""
++    digest: ""

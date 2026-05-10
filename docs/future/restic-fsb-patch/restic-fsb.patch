@@ -37,12 +37,13 @@ Verify: terraform validate + helm lint after apply
 diff --git a/infrastructure/terraform/cluster-controllers.tf b/infrastructure/terraform/cluster-controllers.tf
 --- a/infrastructure/terraform/cluster-controllers.tf
 +++ b/infrastructure/terraform/cluster-controllers.tf
-@@ -123,9 +123,22 @@
+@@ -123,9 +123,23 @@
    set {
      name  = "serviceAccount.server.annotations.eks\\.amazonaws\\.com/role-arn"
      value = aws_iam_role.velero.arn
    }
 
++  # AEGIS-PATCH-ANCHOR: restic-fsb
 +  # FSB path enabled for DR-tier Schedule B (Kopia uploader, default since
 +  # Velero 1.10). Schedule A (operational) continues on CSI. See
 +  # docs/future/restic-fsb-patch.md for trade-off rationale.
@@ -63,12 +64,13 @@ diff --git a/infrastructure/terraform/cluster-controllers.tf b/infrastructure/te
 diff --git a/helm/aegis-statefulset/templates/velero-schedule-dr.yaml b/helm/aegis-statefulset/templates/velero-schedule-dr.yaml
 --- a/helm/aegis-statefulset/templates/velero-schedule-dr.yaml
 +++ b/helm/aegis-statefulset/templates/velero-schedule-dr.yaml
-@@ -29,13 +29,16 @@
+@@ -29,13 +29,17 @@
        - velero
        - karpenter
        - argocd
 -    snapshotVolumes: true
 -    snapshotMoveData: true  # DR tier: replicate across regions
++    # AEGIS-PATCH-ANCHOR: restic-fsb
 +    # FSB path for DR tier — Kopia chunks land in BSL (replicated to
 +    # DR region via S3 cross-region replication, NOT via EBS CopySnapshot).
 +    # Schedule A (operational) stays on CSI for fast restore.
