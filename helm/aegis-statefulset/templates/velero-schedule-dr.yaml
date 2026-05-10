@@ -1,0 +1,63 @@
+# Velero Schedule B — DR tier (per ADR-04 § dual-cadence pattern).
+#
+# Looser cadence (4h default) for region-failure recovery. Cross-region
+# replication enabled via:
+#   - storageLocation: default (BSL bucket with cross-region replication)
+#   - snapshotMoveData: true (CSI: invokes EBS CopySnapshot to DR region)
+#   - volumeSnapshotLocations: [source-region, dr-region]
+#
+# Cadence math (per cost-estimate-methodology.md):
+#   spec RPO ≤ 6h
+#   = 4h cadence + ~15min copy duration + 30min retry margin = 4h45m ≤ 6h ✅
+#   → 1h15m headroom against spec ceiling
+#
+# Hook fsfreeze same as Schedule A — application consistency requirement
+# is identical for both tiers.
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: {{ include "aegis-statefulset.fullname" . }}-schedule-dr
+  namespace: velero
+  labels:
+    {{- include "aegis-statefulset.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+    aegis.io/backup-tier: dr
+spec:
+  schedule: "0 */{{ .Values.backup.dr.cadence_hours }} * * *"
+  template:
+    includedNamespaces:
+      - {{ .Release.Namespace }}
+    excludedNamespaces:
+      - kube-system
+      - monitoring
+      - kyverno
+      - external-secrets
+      - velero
+      - karpenter
+      - argocd
+    snapshotVolumes: true
+    snapshotMoveData: true  # DR tier: replicate across regions
+    ttl: "{{ .Values.backup.dr.retention_days }}d"
+    storageLocation: default  # replicated BSL bucket (velero_bsl)
+    volumeSnapshotLocations:
+      - source-region
+      - dr-region
+    hooks:
+      resources:
+        - name: stateful-fsfreeze
+          includedNamespaces:
+            - {{ .Release.Namespace }}
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/component: stateful-data
+          pre:
+            - exec:
+                container: app
+                command: ["/bin/sh", "-c", "sync && echo 'pre-backup quiesce'"]
+                onError: Fail
+                timeout: 10s
+          post:
+            - exec:
+                container: app
+                command: ["/bin/sh", "-c", "echo 'post-backup'"]
+                onError: Continue

@@ -1,0 +1,15 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.storage.storage_class }}
+  labels:
+    {{- include "aegis-statefulset.labels" . | nindent 4 }}
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+  # KMS key set via Terraform output; see infrastructure/terraform/kms.tf
+  # kmsKeyId: <set via terraform output>
+volumeBindingMode: WaitForFirstConsumer  # CRITICAL per ADR-01
+allowVolumeExpansion: true                # CRITICAL per ADR-02
+reclaimPolicy: {{ .Values.storage.reclaim_policy }}  # Retain per ADR-02

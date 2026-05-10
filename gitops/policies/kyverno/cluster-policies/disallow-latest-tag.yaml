@@ -1,0 +1,69 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+  annotations:
+    policies.kyverno.io/title: Disallow Latest Tag
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: |
+      Per ADR-09 (SHA pinning) — disallow `:latest` and untagged images.
+      Production should use SHA digest pinning (`image@sha256:...`); dev/staging
+      may use semver tags but never `latest`. Tag mutability is the supply-chain
+      vulnerability this policy and ADR-09 close together: pinning at the
+      reference layer (ADR-09) covers build time; this admission policy covers
+      cluster-runtime drift (kubectl apply of a hand-rolled manifest, Helm
+      values override, etc.).
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: require-image-tag
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "An image tag is required (no implicit :latest). See ADR-09."
+        pattern:
+          spec:
+            containers:
+              - image: "*:*"
+    - name: disallow-latest-tag
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "Using a tag of `latest` is forbidden (per ADR-09). Pin to digest in prod, semver in dev."
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"
+    - name: require-image-tag-init
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "Init container images also require a tag (per ADR-09)."
+        pattern:
+          spec:
+            =(initContainers):
+              - image: "*:*"
+    - name: disallow-latest-tag-init
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "Init container images cannot use `:latest` (per ADR-09)."
+        pattern:
+          spec:
+            =(initContainers):
+              - image: "!*:latest"

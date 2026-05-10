@@ -1,0 +1,87 @@
+# =============================================================
+# Private context — NEVER committed to public repo
+# =============================================================
+# These files contain personal AI-tool operating rules and
+# assignment-specific context. They are local tooling for development;
+# the public submission must not include them.
+CLAUDE.md
+AGENTS.md
+.claude-rules/
+.claude/
+_context/
+
+# =============================================================
+# Terraform
+# =============================================================
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.auto.tfvars
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# =============================================================
+# Helm
+# =============================================================
+charts/*.tgz
+*.tgz
+
+# =============================================================
+# Secrets / Credentials
+# =============================================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+credentials.json
+**/secrets/
+
+# =============================================================
+# macOS
+# =============================================================
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# =============================================================
+# IDE / Editor
+# =============================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.netrwhist
+
+# =============================================================
+# Build / Logs
+# =============================================================
+node_modules/
+dist/
+build/
+*.log
+logs/
+
+# =============================================================
+# Python (if any tooling scripts)
+# =============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+
+# =============================================================
+# Backup files
+# =============================================================
+*.bak
+*.backup
+*.orig

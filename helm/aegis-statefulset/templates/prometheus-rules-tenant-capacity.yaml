@@ -1,0 +1,111 @@
+{{- /*
+  Three-tier tenant-capacity alert pyramid (per ADR-01).
+
+  Tier 1 — Tenant growth rate:    forecast 7d linear regression
+  Tier 2 — Tenant absolute size:  pre-emptive (75%) + emergency (90%)
+  Tier 3 — Pod EBS approaching:   warning (80%) + emergency (92%)
+  Tier 4 — Telemetry self-test:   sidecar vs node metric divergence
+
+  Thresholds reference .Values.relocation.thresholds where applicable;
+  numeric SI bytes (2e12 = 2 TB) used inline so PromQL stays readable.
+*/ -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "aegis-statefulset.fullname" . }}-tenant-capacity
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-statefulset.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alerting
+spec:
+  groups:
+    - name: aegis-tenant-capacity
+      interval: 5m
+      rules:
+        # ----------------------------------------------------------------
+        # (1) Tenant growth rate forecast — 7d linear regression.
+        #     Triggers when forecast crosses 2 TB pod cap within 7 days.
+        # ----------------------------------------------------------------
+        - alert: TenantGrowthRateExceeded
+          expr: |
+            predict_linear(tenant_storage_bytes[7d], 7*86400) > 2e12
+          for: 30m
+          labels:
+            severity: warning
+            relocation_trigger: rate_of_change
+          annotations:
+            summary: "Tenant {{`{{ $labels.tenant_id }}`}} forecast > 2 TB in 7 days"
+            description: "Per ADR-01 — proactive relocation candidate."
+            runbook: docs/operations/tenant-relocation.md
+
+        # ----------------------------------------------------------------
+        # (2a) Tenant absolute size — pre-emptive (PR-reviewed relocation).
+        #      75% of 2 TB pod cap = 1.5 TB.
+        # ----------------------------------------------------------------
+        - alert: TenantApproachingPodCap
+          expr: tenant_storage_bytes > 1.5e12
+          for: 1h
+          labels:
+            severity: warning
+            relocation_trigger: pre_emptive
+          annotations:
+            summary: "Tenant {{`{{ $labels.tenant_id }}`}} > 1.5 TB (75% of pod cap)"
+            description: "Per ADR-01 § 75% threshold — open relocation PR."
+
+        # ----------------------------------------------------------------
+        # (2b) Tenant absolute size — emergency (auto-trigger).
+        #      90% of 2 TB pod cap = 1.8 TB.
+        # ----------------------------------------------------------------
+        - alert: TenantEmergencyCap
+          expr: tenant_storage_bytes > 1.8e12
+          for: 5m
+          labels:
+            severity: page
+            relocation_trigger: emergency
+          annotations:
+            summary: "Tenant {{`{{ $labels.tenant_id }}`}} > 1.8 TB — emergency relocation"
+            description: "Per ADR-01 § 90% threshold — auto-trigger relocation."
+
+        # ----------------------------------------------------------------
+        # (3a) Pod EBS approaching full — warning (80%).
+        # ----------------------------------------------------------------
+        - alert: PodEBSApproachingFull
+          expr: |
+            1 - (node_filesystem_avail_bytes{mountpoint=~"/data.*"} /
+                 node_filesystem_size_bytes{mountpoint=~"/data.*"}) > 0.80
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{`{{ $labels.pod }}`}} EBS > 80% full"
+            description: "Cell expansion or per-tenant relocation needed."
+
+        # ----------------------------------------------------------------
+        # (3b) Pod EBS emergency — imminent overflow (92%).
+        # ----------------------------------------------------------------
+        - alert: PodEBSEmergency
+          expr: |
+            1 - (node_filesystem_avail_bytes{mountpoint=~"/data.*"} /
+                 node_filesystem_size_bytes{mountpoint=~"/data.*"}) > 0.92
+          for: 5m
+          labels:
+            severity: page
+          annotations:
+            summary: "Pod {{`{{ $labels.pod }}`}} EBS > 92% — imminent overflow"
+
+        # ----------------------------------------------------------------
+        # (4) Telemetry self-test — sidecar tenant aggregate vs node EBS.
+        #     Divergence > 50 GB suggests sidecar bug, orphan files, or
+        #     compaction lag.
+        # ----------------------------------------------------------------
+        - alert: TelemetryDivergence
+          expr: |
+            abs(sum by (pod) (tenant_storage_bytes) -
+                (node_filesystem_size_bytes{mountpoint=~"/data.*"} -
+                 node_filesystem_avail_bytes{mountpoint=~"/data.*"})) > 50e9
+          for: 1h
+          labels:
+            severity: info
+          annotations:
+            summary: "Telemetry divergence on {{`{{ $labels.pod }}`}} > 50 GB"
+            description: "Sidecar tenant aggregate disagrees with EBS used. Possible: sidecar bug / orphan files / compaction lag."

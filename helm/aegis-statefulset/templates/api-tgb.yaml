@@ -1,0 +1,20 @@
+# TargetGroupBinding — binds the API Service to the ALB Target Group
+# created by Terraform. Required for ALB-to-Pod traffic in IP target mode
+# (per AWS Load Balancer Controller).
+{{- if .Values.api.enabled }}
+{{- if .Values.alb.target_group_arn }}
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: {{ include "aegis-statefulset.fullname" . }}-api-tgb
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-statefulset.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api-tier
+spec:
+  serviceRef:
+    name: {{ include "aegis-statefulset.fullname" . }}-api
+    port: 8080
+  targetGroupARN: {{ required "alb.target_group_arn must be set (from Terraform output)" .Values.alb.target_group_arn }}
+{{- end }}
+{{- end }}

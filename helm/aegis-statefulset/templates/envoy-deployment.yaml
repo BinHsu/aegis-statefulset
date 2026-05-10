@@ -1,0 +1,121 @@
+# Envoy router tier (per ADR-03 placement-table routing).
+# Custom Lua filter inspects X-Tenant-ID header, queries placement table,
+# routes to the correct stateful pod via headless DNS.
+# Pinned to master AZ (Wave 4 topology).
+{{- if .Values.envoy.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aegis-statefulset.fullname" . }}-envoy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-statefulset.labels" . | nindent 4 }}
+    app.kubernetes.io/component: envoy-router
+spec:
+  replicas: {{ .Values.envoy.replicas }}
+  selector:
+    matchLabels:
+      {{- include "aegis-statefulset.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: envoy-router
+  template:
+    metadata:
+      labels:
+        {{- include "aegis-statefulset.labels" . | nindent 8 }}
+        app.kubernetes.io/component: envoy-router
+    spec:
+      serviceAccountName: {{ include "aegis-statefulset.serviceAccountName" . }}
+
+      affinity:
+        # Master AZ pin (Wave 4 topology).
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: topology.kubernetes.io/zone
+                    operator: In
+                    values: ["{{ .Values.master_az }}"]
+        podAntiAffinity:
+          {{- if eq .Values.envoy.pod_anti_affinity.type "hard" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  {{- include "aegis-statefulset.selectorLabels" . | nindent 18 }}
+                  app.kubernetes.io/component: envoy-router
+              topologyKey: kubernetes.io/hostname
+          {{- else }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "aegis-statefulset.selectorLabels" . | nindent 20 }}
+                    app.kubernetes.io/component: envoy-router
+                topologyKey: kubernetes.io/hostname
+          {{- end }}
+
+      # Pod security per ADR-07
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: envoy
+          image: "{{ .Values.envoy.image.repository }}:{{ .Values.envoy.image.tag }}@{{ .Values.envoy.image.digest }}"
+          imagePullPolicy: {{ .Values.envoy.image.pullPolicy }}
+
+          args:
+            - "-c"
+            - "/etc/envoy/envoy.yaml"
+            - "--service-cluster"
+            - "aegis-envoy-router"
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: admin
+              containerPort: 9901
+              protocol: TCP
+
+          volumeMounts:
+            - name: envoy-config
+              mountPath: /etc/envoy
+
+          resources:
+            requests:
+              cpu: {{ .Values.envoy.resources.requests.cpu }}
+              memory: {{ .Values.envoy.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.envoy.resources.limits.cpu }}
+              memory: {{ .Values.envoy.resources.limits.memory }}
+
+          # Container security context per ADR-07
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 9901
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 9901
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+      volumes:
+        - name: envoy-config
+          configMap:
+            name: {{ include "aegis-statefulset.fullname" . }}-envoy-config
+{{- end }}

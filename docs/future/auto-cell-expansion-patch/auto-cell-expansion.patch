@@ -1,0 +1,311 @@
+From: aegis-statefulset architecture team
+Subject: [PATCH] Auto-expand cells on tenant-density threshold via custom controller
+Date: 2026-05-10
+References: docs/operations/automation-tiers.md § 2c, ADR-04
+
+This patch flips cell expansion from semi-auto (operator-driven) to
+fully-automated. A custom Kubernetes controller watches per-cell
+`tenant_storage_bytes` metrics; when threshold crossed AND budget
+headroom is available (via FinOps API webhook), it provisions a new
+cell by patching ArgoCD ApplicationSet generator.
+
+Apply only after Stage 3 establishes (a) the customer's growth tempo
+makes manual expansion an operational burden AND (b) the customer has
+a FinOps approval workflow exposed via HTTP API for budget-check
+integration. Without (b), this patch's controller will block on every
+expansion attempt.
+
+Files added:
+  1. helm/aegis-statefulset/templates/cell-expander-controller.yaml
+  2. infrastructure/lambda/cell-expander/expander.py  (controller body)
+  3. infrastructure/terraform/iam-cell-expander.tf  (IRSA role)
+
+Files modified:
+  4. helm/aegis-statefulset/values.yaml  (+5 flags, default off)
+
+Apply: git apply docs/future/auto-cell-expansion-patch/auto-cell-expansion.patch
+
+---
+
+diff --git a/helm/aegis-statefulset/templates/cell-expander-controller.yaml b/helm/aegis-statefulset/templates/cell-expander-controller.yaml
+new file mode 100644
+--- /dev/null
++++ b/helm/aegis-statefulset/templates/cell-expander-controller.yaml
+@@ -0,0 +1,108 @@
++# Cell-expander custom controller — auto-provisions new cells when
++# tenant_storage_bytes crosses threshold AND budget headroom available.
++#
++# Per docs/operations/automation-tiers.md § 2c — flips Tier 2 to Tier 1.
++# Apply only when customer has FinOps approval webhook + accepts auto
++# spend commitment up to per-cell cost (~€700/month per
++# docs/operations/cost-estimate-methodology.md).
++#
++# Disabled by default (capacity.auto_expansion.enabled = false).
++
++{{- if .Values.capacity.auto_expansion.enabled }}
++apiVersion: v1
++kind: ServiceAccount
++metadata:
++  name: cell-expander
++  namespace: {{ .Release.Namespace }}
++  annotations:
++    eks.amazonaws.com/role-arn: {{ .Values.capacity.auto_expansion.iam_role_arn }}
++---
++apiVersion: rbac.authorization.k8s.io/v1
++kind: ClusterRole
++metadata:
++  name: cell-expander
++rules:
++  - apiGroups: [""]
++    resources: ["configmaps"]
++    verbs: ["get", "list", "watch", "patch", "update"]
++  - apiGroups: ["argoproj.io"]
++    resources: ["applicationsets", "applications"]
++    verbs: ["get", "list", "watch", "patch", "update"]
++  - apiGroups: ["apps"]
++    resources: ["statefulsets"]
++    verbs: ["get", "list", "watch"]
++---
++apiVersion: rbac.authorization.k8s.io/v1
++kind: ClusterRoleBinding
++metadata:
++  name: cell-expander
++roleRef:
++  apiGroup: rbac.authorization.k8s.io
++  kind: ClusterRole
++  name: cell-expander
++subjects:
++  - kind: ServiceAccount
++    name: cell-expander
++    namespace: {{ .Release.Namespace }}
++---
++apiVersion: apps/v1
++kind: Deployment
++metadata:
++  name: cell-expander
++  namespace: {{ .Release.Namespace }}
++  labels:
++    {{- include "aegis-statefulset.labels" . | nindent 4 }}
++    app.kubernetes.io/component: capacity-controller
++spec:
++  replicas: 1
++  selector:
++    matchLabels:
++      app.kubernetes.io/name: cell-expander
++  template:
++    metadata:
++      labels:
++        app.kubernetes.io/name: cell-expander
++    spec:
++      serviceAccountName: cell-expander
++      securityContext:
++        runAsNonRoot: true
++        runAsUser: 65532
++        seccompProfile:
++          type: RuntimeDefault
++      containers:
++        - name: expander
++          image: {{ .Values.capacity.auto_expansion.image.repository }}:{{ .Values.capacity.auto_expansion.image.tag }}@{{ .Values.capacity.auto_expansion.image.digest }}
++          imagePullPolicy: IfNotPresent
++          env:
++            - name: NAMESPACE
++              value: {{ .Release.Namespace }}
++            - name: BUDGET_CHECK_URL
++              value: {{ .Values.capacity.auto_expansion.budget_check_url | quote }}
++            - name: THRESHOLD_PCT
++              value: {{ .Values.capacity.auto_expansion.threshold_pct | quote }}
++            - name: MAX_CELLS_PER_DAY
++              value: {{ .Values.capacity.auto_expansion.max_cells_per_day | quote }}
++            - name: APPSET_NAME
++              value: aegis-statefulset
++            - name: LOG_LEVEL
++              value: INFO
++          resources:
++            requests:
++              cpu: 50m
++              memory: 128Mi
++            limits:
++              cpu: 200m
++              memory: 256Mi
++          securityContext:
++            allowPrivilegeEscalation: false
++            readOnlyRootFilesystem: true
++            capabilities:
++              drop: ["ALL"]
++{{- end }}
+diff --git a/infrastructure/lambda/cell-expander/expander.py b/infrastructure/lambda/cell-expander/expander.py
+new file mode 100644
+--- /dev/null
++++ b/infrastructure/lambda/cell-expander/expander.py
+@@ -0,0 +1,113 @@
++"""
++Cell-expander controller body.
++
++Watches per-cell tenant_storage_bytes metric; when threshold crossed AND
++budget headroom available, patches the ArgoCD ApplicationSet generator
++to provision a new cell.
++
++Per docs/operations/automation-tiers.md § 2c. Apply via the controller
++Deployment in cell-expander-controller.yaml.
++
++Build (operator does this once):
++    cd infrastructure/lambda/cell-expander
++    docker build -t cell-expander:v0.1 -f Dockerfile .
++    docker push <registry>/cell-expander:v0.1
++    # Update digest in helm/aegis-statefulset/values.yaml
++"""
++
++import json
++import logging
++import os
++import time
++from datetime import datetime, timezone
++
++import requests
++from kubernetes import client, config, watch
++
++log = logging.getLogger()
++log.setLevel(os.getenv("LOG_LEVEL", "INFO"))
++
++NAMESPACE = os.environ["NAMESPACE"]
++BUDGET_CHECK_URL = os.environ.get("BUDGET_CHECK_URL", "")
++THRESHOLD_PCT = float(os.environ.get("THRESHOLD_PCT", "80"))
++MAX_CELLS_PER_DAY = int(os.environ.get("MAX_CELLS_PER_DAY", "2"))
++APPSET_NAME = os.environ["APPSET_NAME"]
++
++config.load_incluster_config()
++core = client.CoreV1Api()
++custom = client.CustomObjectsApi()
++
++_today_expansions = 0
++_today_date = datetime.now(timezone.utc).date()
++
++
++def reset_daily_counter():
++    global _today_expansions, _today_date
++    today = datetime.now(timezone.utc).date()
++    if today != _today_date:
++        log.info("Daily counter reset: %d expansions on %s", _today_expansions, _today_date)
++        _today_expansions = 0
++        _today_date = today
++
++
++def budget_headroom_available() -> bool:
++    """Call customer's FinOps budget check webhook."""
++    if not BUDGET_CHECK_URL:
++        log.warning("Budget check URL not configured; defaulting to NO expansion (conservative)")
++        return False
++    try:
++        r = requests.get(f"{BUDGET_CHECK_URL}?cost_eur=700", timeout=10)
++        r.raise_for_status()
++        return r.json().get("approved", False)
++    except Exception as e:
++        log.error("Budget check failed: %s; defaulting to NO expansion", e)
++        return False
++
++
++def metric_for_cell(cell_id: str) -> float:
++    """Read tenant_storage_bytes from ConfigMap-cached metrics (Prometheus
++    federation pre-aggregates and writes to a ConfigMap; controller doesn't
++    poll Prometheus directly to avoid adding load)."""
++    try:
++        cm = core.read_namespaced_config_map("cell-metrics-cache", NAMESPACE)
++        return float(json.loads(cm.data.get(cell_id, "0")).get("storage_pct", 0))
++    except Exception as e:
++        log.warning("Could not read metric for cell %s: %s", cell_id, e)
++        return 0.0
++
++
++def expand_cell():
++    """Patch the ApplicationSet generator to add a new cell."""
++    log.info("Expanding cells via ApplicationSet generator patch")
++    appset = custom.get_namespaced_custom_object(
++        group="argoproj.io", version="v1alpha1",
++        namespace=NAMESPACE, plural="applicationsets",
++        name=APPSET_NAME,
++    )
++    current_count = int(appset["spec"]["generators"][0]["list"]["elements"][0].get("cell_count", "1"))
++    new_count = current_count + 1
++    patch = {"spec": {"generators": [{"list": {"elements": [{"cell_count": str(new_count)}]}}]}}
++    custom.patch_namespaced_custom_object(
++        group="argoproj.io", version="v1alpha1",
++        namespace=NAMESPACE, plural="applicationsets",
++        name=APPSET_NAME, body=patch,
++    )
++    global _today_expansions
++    _today_expansions += 1
++    log.info("Expanded to %d cells; today's count: %d", new_count, _today_expansions)
++
++
++def main():
++    log.info("cell-expander started; namespace=%s, threshold=%.0f%%", NAMESPACE, THRESHOLD_PCT)
++    while True:
++        reset_daily_counter()
++        for cell_id in [f"cell-{i}" for i in range(0, 100)]: # bounded scan
++            usage = metric_for_cell(cell_id)
++            if usage > THRESHOLD_PCT:
++                if _today_expansions >= MAX_CELLS_PER_DAY:
++                    log.warning("Cell %s at %.1f%% but daily expansion cap reached", cell_id, usage)
++                    continue
++                if not budget_headroom_available():
++                    log.warning("Cell %s at %.1f%% but budget rejected expansion", cell_id, usage)
++                    continue
++                expand_cell()
++                break # only expand one per cycle
++        time.sleep(300) # 5-min poll
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/infrastructure/terraform/iam-cell-expander.tf b/infrastructure/terraform/iam-cell-expander.tf
+new file mode 100644
+--- /dev/null
++++ b/infrastructure/terraform/iam-cell-expander.tf
+@@ -0,0 +1,33 @@
++# IRSA role for cell-expander controller. Allows EKS cluster API access
++# scoped to the cell-expander ServiceAccount in the application namespace.
++
++resource "aws_iam_role" "cell_expander" {
++  count = var.capacity_auto_expansion_enabled ? 1 : 0
++
++  name = "aegis-statefulset-${var.environment}-cell-expander"
++
++  assume_role_policy = jsonencode({
++    Version = "2012-10-17"
++    Statement = [{
++      Effect = "Allow"
++      Principal = {
++        Federated = aws_iam_openid_connect_provider.eks.arn
++      }
++      Action = "sts:AssumeRoleWithWebIdentity"
++      Condition = {
++        StringEquals = {
++          "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub" = "system:serviceaccount:aegis-app:cell-expander"
++        }
++      }
++    }]
++  })
++}
++
++# Permissions: read CloudWatch metrics for budget-check verification
++resource "aws_iam_role_policy" "cell_expander_inline" {
++  count = var.capacity_auto_expansion_enabled ? 1 : 0
++
++  role = aws_iam_role.cell_expander[0].id
++  name = "cell-expander-inline"
++
++  policy = jsonencode({
++    Version = "2012-10-17"
++    Statement = [{
++      Effect   = "Allow"
++      Action   = ["cloudwatch:GetMetricData", "cloudwatch:PutMetricData"]
++      Resource = "*"
++    }]
++  })
++}
++
++variable "capacity_auto_expansion_enabled" {
++  type        = bool
++  default     = false
++  description = "If true, IAM resources for cell-expander controller are provisioned. See docs/operations/automation-tiers.md § 2c."
++}

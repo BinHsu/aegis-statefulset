@@ -1,0 +1,87 @@
+# OpenCost — Kubernetes-native cost monitoring, synced via ArgoCD.
+#
+# FinOps as GitOps: cost-attribution configuration (custom pricing for the
+# Frankfurt region, per-namespace cost rollups, network cost attribution) is
+# code, reviewed in PR, reconciled by ArgoCD. The cost model is not a runtime
+# tweak — it's part of the platform contract.
+#
+# OpenCost queries Prometheus (kube-prometheus-stack from the observability
+# Application — see `observability-stack.yaml`) for resource usage and
+# multiplies by the configured AWS Frankfurt pricing. The pricing here
+# matches eu-central-1 on-demand and spot rates as of 2026-Q2; Renovate
+# refreshes the chart pin (per ADR-09) while pricing stays manually
+# reviewed because price drift is a signal to revisit FinOps assumptions.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: opencost
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    aegis.io/component: opencost
+    aegis.io/tier: finops
+    aegis.io/managed-by: argocd
+spec:
+  project: aegis-statefulset
+
+  source:
+    repoURL: https://opencost.github.io/opencost-helm-chart
+    chart: opencost
+    # TODO: pin to chart digest via Renovate (per ADR-09).
+    # Renovate's `pinDigests: true` + helmv3 manager rewrites this to a
+    # sha256 digest reference on first PR; until then the version pin is
+    # the closest legible primitive in the Helm OCI / classic ambiguity.
+    targetRevision: 1.39.0
+    helm:
+      values: |
+        opencost:
+          exporter:
+            defaultClusterId: "aegis-statefulset"
+          customPricing:
+            enabled: true
+            costModel:
+              # Frankfurt eu-central-1 pricing, vCPU/hour and GB-RAM/hour.
+              # Numbers reviewed quarterly against AWS pricing API; manual
+              # update PR (not Renovate) when the FinOps team revises the
+              # custom-pricing curve.
+              CPU: "0.031611"
+              spotCPU: "0.006655"
+              RAM: "0.004237"
+              GPU: "0.95"
+              storage: "0.000138"
+          prometheus:
+            external:
+              enabled: true
+              # Prometheus ships from `observability-stack.yaml`. OpenCost
+              # only reads metrics; there is no write path back.
+              url: "http://kube-prometheus-stack-prometheus.observability:9090"
+        ui:
+          enabled: true
+        networkCosts:
+          # Per-pod / per-service network cost attribution. Required for
+          # the "which tenant is paying for cross-AZ traffic?" question.
+          enabled: true
+          config:
+            services:
+              amazon-web-services: true
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: finops
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 10

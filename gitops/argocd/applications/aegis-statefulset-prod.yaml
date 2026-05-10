@@ -1,0 +1,58 @@
+# Production sync policy: MANUAL.
+# Per ADR-08, the stateful tier requires human approval for every sync event.
+# Operator runs `argocd app sync aegis-statefulset-prod` after reviewing the
+# diff in the Argo UI (or `argocd app diff`). Auto-sync + self-heal would risk
+# a controller stomping running stateful pods on a transient drift signal —
+# unacceptable for a tier where data on EBS is the only irreplaceable asset (P1).
+#
+# `targetRevision` is pinned to a release tag (not `main`) so production never
+# follows trunk. CI publishes immutable `vN.M.P` tags; promotion is a deliberate
+# tag bump in this manifest, reviewed in PR.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aegis-statefulset-prod
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: aegis-statefulset
+
+  source:
+    repoURL: https://github.com/BinHsu/aegis-statefulset.git
+    # TODO: bump to first stable release tag once weekend implementation lands.
+    targetRevision: main
+    path: helm/aegis-statefulset
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-prod.yaml
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: aegis-app
+
+  # No `automated` block — sync is manual.
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - Validate=true
+      - PrunePropagationPolicy=foreground
+      # PVCs and StatefulSets must never be auto-pruned in prod.
+      - PruneLast=true
+
+  revisionHistoryLimit: 20
+
+  # Ignore differences ArgoCD should not flag as drift:
+  #   - HPA-managed replica counts
+  #   - PVC volume size after online expansion (LVM-managed per ADR-02)
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jsonPointers:
+        - /spec/replicas
+    - group: ""
+      kind: PersistentVolumeClaim
+      jsonPointers:
+        - /spec/resources/requests/storage

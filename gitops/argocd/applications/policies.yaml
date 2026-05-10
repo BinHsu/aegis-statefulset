@@ -1,0 +1,65 @@
+# Cluster-wide Kyverno policies, synced via ArgoCD.
+#
+# Policy-as-code IS GitOps for governance: every cluster policy lives in git,
+# every change goes through PR review + CI gates, ArgoCD reconciles policy
+# state on the cluster against the declared state in this repo.
+#
+# Per ADR-07 (PSS + Kyverno), Kyverno is installed separately (its own
+# Helm chart in the kyverno namespace). This Application syncs the
+# ClusterPolicy CRDs that Kyverno evaluates — both the cluster-wide policies
+# in `gitops/policies/kyverno/cluster-policies/` (this Wave) and the
+# supply-chain policies in `gitops/policies/kyverno/supply-chain/` (DevSecOps
+# wave, Cosign image verification per ADR-07).
+#
+# Auto-sync + self-heal is intentional here: drift on a security policy
+# (someone deleted the policy out-of-band) is itself a security event, and
+# we want ArgoCD to put the policy back immediately rather than wait for
+# manual intervention. This is one of the few cases where stateful-style
+# manual gates are wrong — policy absence is more dangerous than policy
+# reapplication.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aegis-platform-policies
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    aegis.io/component: platform-policies
+    aegis.io/tier: governance
+    aegis.io/managed-by: argocd
+spec:
+  project: aegis-statefulset
+
+  source:
+    repoURL: https://github.com/BinHsu/aegis-statefulset.git
+    targetRevision: main
+    path: gitops/policies
+    directory:
+      recurse: true
+      include: '{kyverno/**/*.yaml,*.yaml}'
+
+  destination:
+    server: https://kubernetes.default.svc
+    # ClusterPolicy is cluster-scoped, but namespace is required by the
+    # Application schema. Kyverno's own controllers run in `kyverno`.
+    namespace: kyverno
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # Kyverno itself installed separately (its own Helm release).
+      # We only manage policies here, not the controller.
+      - CreateNamespace=false
+      - ServerSideApply=true
+      - Validate=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 10

@@ -1,0 +1,136 @@
+# PR Validation — runs on every pull request to main.
+#
+# Implements:
+#   - ADR-035 (anonymization CI gate, Public/Private Boundary Rule)
+#   - ADR-036 (Helm + kubeconform validation)
+#   - ADR-037 (Terraform fmt / validate / tflint / tfsec)
+#   - ADR-032 (Trivy vulnerability scan)
+#   - ADR-039 (SHA-pinned third-party actions)
+#
+# All third-party actions are pinned to commit SHAs per ADR-039.
+# When updating, run Renovate or `gh api` to fetch and verify the SHA.
+
+name: PR Validation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate:
+    name: Lint and validate
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      # ADR-035: the forbidden token itself lives in a repository secret so it
+      # never appears in the workflow YAML (which is a public file). The check
+      # injects the token at runtime via env, then greps the working tree.
+      - name: Anonymization gate (ADR-035, Public/Private Boundary Rule)
+        env:
+          PRIVATE_NAME: ${{ secrets.COMPANY_PRIVATE_NAME }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${PRIVATE_NAME:-}" ]; then
+            echo "::error::COMPANY_PRIVATE_NAME secret is not set. See ADR-035."
+            exit 1
+          fi
+
+          matches=$(grep -ril "$PRIVATE_NAME" \
+            --include="*.md" --include="*.yaml" --include="*.yml" \
+            --include="*.tf" --include="*.sh" --include="*.json" \
+            --exclude-dir=_context \
+            --exclude-dir=.claude-rules \
+            --exclude-dir=.git \
+            --exclude-dir=node_modules \
+            . || true)
+
+          if [ -n "$matches" ]; then
+            echo "::error::Private name found in public files. See ADR-035 substitution table."
+            echo "Matching files:"
+            echo "$matches"
+            exit 1
+          fi
+          echo "OK: Public surface clean."
+
+      - name: Setup Helm
+        uses: azure/setup-helm@b7246b12e77f7134dc2d460a3d5bad15bbe29390  # v4.1.0
+        with:
+          version: '3.13.3'
+
+      - name: Helm lint (ADR-036)
+        run: helm lint helm/aegis-statefulset/
+
+      - name: Install kubeconform
+        run: |
+          set -euo pipefail
+          curl -sSL -o /tmp/kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp
+          /tmp/kubeconform -v
+
+      - name: Helm template + kubeconform (ADR-036)
+        # The schema-location URLs let kubeconform validate CRDs we use
+        # outside the K8s core schema set:
+        #   - velero.io/v1 (Schedule, Backup, Restore)
+        #   - monitoring.coreos.com/v1 (Probe, PrometheusRule, ServiceMonitor)
+        # Datree maintains a CRD catalogue at github.com/datreeio/CRDs-catalog
+        # — same URL is used in CONTRIBUTING.md for local validation.
+        run: |
+          set -euo pipefail
+          helm template aegis-statefulset helm/aegis-statefulset/ \
+            | /tmp/kubeconform -summary -strict -kubernetes-version 1.29 \
+                -schema-location default \
+                -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@a1502cd9e758c50496cc9ac5308c4843bcd56d36  # v3.0.0
+        with:
+          terraform_version: '1.6.6'
+
+      - name: Terraform fmt + validate (ADR-037)
+        run: |
+          set -euo pipefail
+          cd infrastructure/terraform
+          terraform fmt -check -recursive
+          terraform init -backend=false
+          terraform validate
+
+      - name: tflint (ADR-037)
+        uses: terraform-linters/setup-tflint@90f302c255ef959cbfb4bd10581afecdb7ece3e6  # v3.0.0 — TODO verify SHA via Renovate
+
+      - name: Run tflint
+        run: |
+          set -euo pipefail
+          cd infrastructure/terraform
+          tflint --init
+          tflint --recursive
+
+      - name: tfsec (ADR-037)
+        uses: aquasecurity/tfsec-action@b466648d6e39e7c75324f25d83891162a721f2d6  # v1.0.3 — TODO verify SHA via Renovate
+        with:
+          working_directory: infrastructure/terraform
+
+      - name: ShellCheck on shell scripts
+        run: |
+          set -euo pipefail
+          if [ -d scripts ]; then
+            find scripts -type f -name "*.sh" -print0 \
+              | xargs -0 shellcheck --severity=warning
+          fi
+
+      - name: Trivy filesystem scan (ADR-032)
+        uses: aquasecurity/trivy-action@aaf3aaeb0f0c7706a6ed4a52d1b3afdd92dccca9  # v0.16.0 — TODO verify SHA via Renovate
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true

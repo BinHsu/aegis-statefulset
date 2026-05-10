@@ -1,0 +1,53 @@
+# Require Cosign keyless signature on all application images.
+#
+# Implements:
+#   - ADR-07 (Trivy + Cosign image signing)
+#   - ADR-09 (SLSA L3 + SBOM attestations)
+#
+# The keyless attestor binds admission to a specific GitHub identity:
+# images must have been signed by the helm-release.yml workflow on the
+# main branch of the BinHsu/aegis-statefulset repo, with a Sigstore-issued
+# certificate from the GitHub OIDC token issuer.
+#
+# Mode: Enforce in app namespaces. background: false because verifyImages
+# pulls signatures from the registry at admission time and is not safe to
+# run as a background mutation.
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: image-signature-required
+  annotations:
+    policies.kyverno.io/title: Require Image Signatures
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: |
+      Per ADR-07 + ADR-09 — every image admitted to application namespaces
+      must carry a valid Cosign keyless signature issued by our build workflow
+      on this repository's main branch via GitHub OIDC.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: verify-signature
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - aegis-app
+                - aegis-app-staging
+                - aegis-app-dev
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/binhsu/aegis-statefulset/*"
+          attestors:
+            - entries:
+                - keyless:
+                    subject: "https://github.com/BinHsu/aegis-statefulset/.github/workflows/helm-release.yml@refs/heads/main"
+                    issuer: "https://token.actions.githubusercontent.com"
+                    rekor:
+                      url: "https://rekor.sigstore.dev"

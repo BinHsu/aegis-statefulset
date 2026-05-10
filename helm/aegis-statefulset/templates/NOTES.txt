@@ -1,0 +1,34 @@
+Deployment of {{ include "aegis-statefulset.fullname" . }} complete.
+
+Verify rollout:
+
+  kubectl get statefulset -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+  kubectl get deployment  -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+  kubectl get pods        -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} -o wide
+  kubectl get pvc         -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+Resolve the ALB DNS (via TargetGroupBinding):
+
+  kubectl get targetgroupbinding -n {{ .Release.Namespace }}
+
+Configuration summary (Wave 4 architecture):
+
+  Master AZ        : {{ .Values.master_az }}
+  DR region        : {{ .Values.dr_region }}
+  Stateful pods    : {{ .Values.stateful.cells.count }} (POC=1; production set via terraform import)
+  Storage          : {{ .Values.stateful.cells.storage_per_pod }} per pod (StorageClass: {{ .Values.storage.storage_class }})
+  API tier         : {{ .Values.api.replicas }} replica(s) (nginx forwarder)
+  Envoy router     : {{ .Values.envoy.replicas }} replica(s)
+  HA model         : {{ .Values.ha.model }}
+  Backup           : Velero schedule, every {{ .Values.backup.cadence_minutes }} min, retention {{ .Values.backup.retention_days }} days
+  Stateful image   : {{ .Values.stateful.image.repository }}:{{ .Values.stateful.image.tag }}@{{ .Values.stateful.image.digest }}
+
+Next steps:
+
+  1. Review chart README: helm/aegis-statefulset/README.md
+  2. Build aegis-stateful-mock and update stateful.image.digest in values.yaml.
+  3. Verify nginx and envoy image digests (search Docker Hub / pull and inspect).
+  4. Wire IRSA role ARN into serviceAccount.annotations from Terraform output.
+  5. Wire ALB Target Group ARN into alb.target_group_arn from Terraform output.
+  6. Confirm Velero is installed and BackupStorageLocation/VolumeSnapshotLocation
+     named "default" exist before applying this chart.

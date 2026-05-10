@@ -1,0 +1,342 @@
+From: aegis-statefulset architecture team
+Subject: [PATCH] Auto-trigger region cutover via Route 53 health checks + Lambda
+Date: 2026-05-10
+References: docs/operations/automation-tiers.md § 2b, ADR-04
+
+This patch flips region-failure cutover from semi-auto (operator-gated)
+to fully-automated. Detection via Route 53 health checks; execution via
+Lambda triggered by health-check transition events.
+
+Apply only after Stage 3 establishes the customer's RTO target requires
+sub-30-min region cutover that operator-paging cannot meet. The default
+~50-min region RTO via runbook is appropriate for most Mittelstand
+profiles; this patch is for the minority needing tighter.
+
+Files added:
+  1. infrastructure/terraform/route53-health-failover.tf
+  2. infrastructure/terraform/lambda-auto-region-cutover.tf
+  3. infrastructure/lambda/auto-region-cutover/index.py
+
+Files modified:
+  4. helm/aegis-statefulset/values.yaml  (+1 flag, default off)
+
+Apply: git apply docs/future/auto-region-cutover-patch/auto-region-cutover.patch
+
+---
+
+diff --git a/infrastructure/terraform/route53-health-failover.tf b/infrastructure/terraform/route53-health-failover.tf
+new file mode 100644
+--- /dev/null
++++ b/infrastructure/terraform/route53-health-failover.tf
+@@ -0,0 +1,72 @@
++# Route 53 health-check-driven failover.
++#
++# Per docs/operations/automation-tiers.md § 2b — flips region-cutover from
++# Tier 2 (semi-auto) to Tier 1 (full-auto). Apply only when the customer's
++# RTO target requires sub-30-min region cutover.
++#
++# Pattern: weighted A-records with health-check association. When primary
++# health checks fail, weight automatically shifts to DR; client DNS resolution
++# follows after TTL expiry.
++
++resource "aws_route53_health_check" "primary_alb" {
++  count = var.ha_region_cutover_auto_trigger_enabled ? 1 : 0
++
++  fqdn              = aws_lb.main.dns_name
++  port              = 443
++  type              = "HTTPS"
++  resource_path     = "/healthz"
++  failure_threshold = 3
++  request_interval  = 30 # seconds; minimum 10 for HTTPS
++
++  tags = merge(local.common_tags, { Purpose = "primary-region-health" })
++}
++
++resource "aws_route53_health_check" "dr_alb" {
++  count = var.ha_region_cutover_auto_trigger_enabled ? 1 : 0
++  provider = aws.dr_region
++
++  fqdn              = "alb-dr-placeholder.${var.dr_region}.elb.amazonaws.com" # operator: substitute actual DR ALB DNS
++  port              = 443
++  type              = "HTTPS"
++  resource_path     = "/healthz"
++  failure_threshold = 3
++  request_interval  = 30
++
++  tags = { Purpose = "dr-region-health" }
++}
++
++# Weighted records — primary 100, DR 0 in steady state.
++# Health check association causes Route 53 to skip the primary record
++# when the health check is unhealthy, falling through to DR record.
++resource "aws_route53_record" "primary_weighted" {
++  count = var.ha_region_cutover_auto_trigger_enabled ? 1 : 0
++
++  zone_id        = var.route53_zone_id
++  name           = var.public_hostname
++  type           = "A"
++  set_identifier = "primary"
++
++  weighted_routing_policy {
++    weight = 100
++  }
++
++  alias {
++    name                   = aws_lb.main.dns_name
++    zone_id                = aws_lb.main.zone_id
++    evaluate_target_health = false
++  }
++
++  health_check_id = aws_route53_health_check.primary_alb[0].id
++}
++
++resource "aws_route53_record" "dr_weighted" {
++  count = var.ha_region_cutover_auto_trigger_enabled ? 1 : 0
++
++  zone_id        = var.route53_zone_id
++  name           = var.public_hostname
++  type           = "A"
++  set_identifier = "dr"
++
++  weighted_routing_policy {
++    weight = 0
++  }
++
++  alias {
++    name                   = "alb-dr-placeholder.${var.dr_region}.elb.amazonaws.com"
++    zone_id                = "Z3F0SRJ5LGBH90" # eu-west-1 ALB hosted zone; operator: verify
++    evaluate_target_health = false
++  }
++
++  health_check_id = aws_route53_health_check.dr_alb[0].id
++}
++
++variable "route53_zone_id" {
++  type        = string
++  default     = ""
++  description = "Route 53 hosted zone ID for the public hostname (required when auto-region-cutover enabled)"
++}
++
++variable "public_hostname" {
++  type        = string
++  default     = ""
++  description = "Public hostname (e.g., app.example.com) for weighted DNS records"
++}
+diff --git a/infrastructure/terraform/lambda-auto-region-cutover.tf b/infrastructure/terraform/lambda-auto-region-cutover.tf
+new file mode 100644
+--- /dev/null
++++ b/infrastructure/terraform/lambda-auto-region-cutover.tf
+@@ -0,0 +1,98 @@
++# Lambda triggered by Route 53 health-check state-change events.
++# Runs Velero restore in the DR region to bring up the application
++# after the health-check transition has shifted DNS weight.
++
++resource "aws_lambda_function" "auto_region_cutover" {
++  count = var.ha_region_cutover_auto_trigger_enabled ? 1 : 0
++
++  function_name = "aegis-statefulset-${var.environment}-auto-region-cutover"
++  role          = aws_iam_role.auto_region_cutover_lambda[0].arn
++  runtime       = "python3.11"
++  handler       = "index.handler"
++  timeout       = 900 # 15 min — Velero restore takes time
++
++  filename         = "${path.module}/../lambda/auto-region-cutover/build/auto-region-cutover.zip"
++  source_code_hash = filebase64sha256("${path.module}/../lambda/auto-region-cutover/build/auto-region-cutover.zip")
++
++  environment {
++    variables = {
++      DR_REGION         = var.dr_region
++      DR_CLUSTER_NAME   = "${local.cluster_name}-dr"
++      VELERO_BSL_BUCKET = aws_s3_bucket.velero_bsl_dr.id
++      LATEST_BACKUP_TAG = "latest"
++      LOG_LEVEL         = "INFO"
++    }
++  }
++
++  tags = local.common_tags
++
++  lifecycle {
++    ignore_changes = [filename, source_code_hash]
++  }
++}
++
++resource "aws_iam_role" "auto_region_cutover_lambda" {
++  count = var.ha_region_cutover_auto_trigger_enabled ? 1 : 0
++
++  name = "aegis-statefulset-${var.environment}-auto-region-cutover"
++
++  assume_role_policy = jsonencode({
++    Version = "2012-10-17"
++    Statement = [{
++      Effect = "Allow"
++      Principal = { Service = "lambda.amazonaws.com" }
++      Action = "sts:AssumeRole"
++    }]
++  })
++}
++
++resource "aws_iam_role_policy_attachment" "auto_region_cutover_basic" {
++  count = var.ha_region_cutover_auto_trigger_enabled ? 1 : 0
++
++  role       = aws_iam_role.auto_region_cutover_lambda[0].name
++  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
++}
++
++resource "aws_iam_role_policy" "auto_region_cutover_inline" {
++  count = var.ha_region_cutover_auto_trigger_enabled ? 1 : 0
++
++  role = aws_iam_role.auto_region_cutover_lambda[0].id
++  name = "auto-region-cutover-inline"
++
++  policy = jsonencode({
++    Version = "2012-10-17"
++    Statement = [
++      {
++        # Run Velero restore command on DR-region ops bastion via SSM
++        Effect   = "Allow"
++        Action   = ["ssm:SendCommand", "ssm:GetCommandInvocation"]
++        Resource = "*"
++      },
++      {
++        Effect   = "Allow"
++        Action   = ["eks:DescribeCluster"]
++        Resource = "arn:aws:eks:${var.dr_region}:*:cluster/*"
++      },
++      {
++        Effect = "Allow"
++        Action = [
++          "s3:GetObject", "s3:ListBucket",
++        ]
++        Resource = [
++          aws_s3_bucket.velero_bsl_dr.arn,
++          "${aws_s3_bucket.velero_bsl_dr.arn}/*",
++        ]
++      },
++    ]
++  })
++}
++
++resource "aws_cloudwatch_event_rule" "route53_health_transition" {
++  count = var.ha_region_cutover_auto_trigger_enabled ? 1 : 0
++
++  name        = "aegis-statefulset-${var.environment}-route53-health-transition"
++  description = "Fires on Route 53 health-check state changes (Healthy ↔ Unhealthy)"
++
++  event_pattern = jsonencode({
++    source      = ["aws.route53"]
++    detail-type = ["Route 53 Health Check Status Change"]
++    detail = {
++      "health-check-id" = [aws_route53_health_check.primary_alb[0].id]
++    }
++  })
++}
++
++resource "aws_cloudwatch_event_target" "auto_region_cutover_lambda_target" {
++  count = var.ha_region_cutover_auto_trigger_enabled ? 1 : 0
++
++  rule = aws_cloudwatch_event_rule.route53_health_transition[0].name
++  arn  = aws_lambda_function.auto_region_cutover[0].arn
++}
++
++resource "aws_lambda_permission" "auto_region_cutover_eventbridge" {
++  count = var.ha_region_cutover_auto_trigger_enabled ? 1 : 0
++
++  statement_id  = "AllowEventBridge"
++  action        = "lambda:InvokeFunction"
++  function_name = aws_lambda_function.auto_region_cutover[0].function_name
++  principal     = "events.amazonaws.com"
++  source_arn    = aws_cloudwatch_event_rule.route53_health_transition[0].arn
++}
++
++variable "ha_region_cutover_auto_trigger_enabled" {
++  type        = bool
++  default     = false
++  description = "If true, region cutover auto-fires via Lambda on Route 53 health-check transition. See docs/operations/automation-tiers.md § 2b for trade-offs."
++}
+diff --git a/infrastructure/lambda/auto-region-cutover/index.py b/infrastructure/lambda/auto-region-cutover/index.py
+new file mode 100644
+--- /dev/null
++++ b/infrastructure/lambda/auto-region-cutover/index.py
+@@ -0,0 +1,86 @@
++"""
++Lambda body for auto-region-cutover triggered by Route 53 health-check
++transition events.
++
++Per docs/operations/automation-tiers.md § 2b:
++  - Triggered when Route 53 detects primary region health-check transitions
++    Healthy → Unhealthy.
++  - DNS weight automatically shifts to DR (handled by Route 53 weighted-with-
++    health-check policy in route53-health-failover.tf).
++  - This Lambda's job is to bring up the application in the DR region by
++    running Velero restore from the cross-region snapshot.
++
++Build:
++    cd infrastructure/lambda/auto-region-cutover
++    pip install boto3 -t build/
++    cp index.py build/
++    cd build && zip -r ../auto-region-cutover.zip .
++"""
++
++import json
++import logging
++import os
++import time
++
++import boto3
++
++log = logging.getLogger()
++log.setLevel(os.getenv("LOG_LEVEL", "INFO"))
++
++DR_REGION = os.environ["DR_REGION"]
++DR_CLUSTER = os.environ["DR_CLUSTER_NAME"]
++VELERO_BSL = os.environ["VELERO_BSL_BUCKET"]
++BACKUP_TAG = os.environ.get("LATEST_BACKUP_TAG", "latest")
++
++ssm = boto3.client("ssm", region_name=DR_REGION)
++cw = boto3.client("cloudwatch")
++
++
++def handler(event, context):
++    log.info("Auto-region-cutover Lambda triggered: %s", json.dumps(event))
++
++    # Verify the transition was Healthy → Unhealthy (not the other way around)
++    detail = event.get("detail", {})
++    new_status = detail.get("status")
++    if new_status != "Unhealthy":
++        log.info("Health-check transitioned to %s (not Unhealthy); no action", new_status)
++        return {"status": "no_action", "reason": f"transition_to_{new_status}"}
++
++    log.info("Primary region health-check Unhealthy; firing Velero restore in DR region %s", DR_REGION)
++
++    # Run velero restore on DR-region ops bastion via SSM Run Command
++    response = ssm.send_command(
++        Targets=[{"Key": "tag:Role", "Values": ["dr-ops-bastion"]}],
++        DocumentName="AWS-RunShellScript",
++        Parameters={
++            "commands": [
++                f"aws eks update-kubeconfig --name {DR_CLUSTER} --region {DR_REGION}",
++                f"velero restore create --from-backup {BACKUP_TAG} --wait",
++                "kubectl get pods -n aegis-app -o wide",  # smoke check
++            ]
++        },
++        Comment=f"auto-region-cutover triggered by Route 53 health transition; ts={int(time.time())}",
++    )
++    cmd_id = response["Command"]["CommandId"]
++    log.info("SSM Run Command issued: %s", cmd_id)
++
++    cw.put_metric_data(
++        Namespace="aegis-statefulset",
++        MetricData=[{
++            "MetricName": "region_cutover_executed",
++            "Dimensions": [{"Name": "Region", "Value": DR_REGION}],
++            "Value": 1,
++            "Unit": "Count",
++        }],
++    )
++
++    return {
++        "status": "executed",
++        "command_id": cmd_id,
++        "dr_region": DR_REGION,
++        "next_step": "monitor velero restore via kubectl + Grafana DR dashboard",
++    }

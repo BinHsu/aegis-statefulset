@@ -1,0 +1,33 @@
+# Patterns to ignore when building Helm packages.
+# Operates on a per-file basis with semantics similar to .gitignore.
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# Helm output
+*.tgz
+.helmignore
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editors / IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Backups / scratch
+*.bak
+*.orig
+*.tmp
+*.tmpl.bak
+README.md.bak
+
+# Local overrides
+values.local.yaml
+values.*.local.yaml

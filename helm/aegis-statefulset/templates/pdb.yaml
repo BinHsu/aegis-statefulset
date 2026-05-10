@@ -1,0 +1,18 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "aegis-statefulset.fullname" . }}-primary
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-statefulset.labels" . | nindent 4 }}
+    app.kubernetes.io/component: stateful-data
+spec:
+  # At least 2/3 primary pods must remain available during voluntary disruption
+  # (rolling updates, node drains). For POC count=1, this becomes 0
+  # (single pod can be disrupted; chaos demo expects this).
+  minAvailable: {{ sub (int .Values.stateful.cells.count) (div (int .Values.stateful.cells.count) 3) }}
+
+  selector:
+    matchLabels:
+      {{- include "aegis-statefulset.selectorLabels" . | nindent 6 }}
+      aegis.io/role: primary

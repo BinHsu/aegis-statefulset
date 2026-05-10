@@ -1,0 +1,122 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restricted-pss
+  annotations:
+    policies.kyverno.io/title: Pod Security Standards — Restricted Profile
+    policies.kyverno.io/category: Pod Security Standards (Restricted)
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: |
+      Enforces the Pod Security Standards "restricted" profile in Kyverno
+      admission rather than relying on Kubernetes' built-in PSA labels alone
+      (per ADR-07). Same control surface; richer messaging, cluster-wide
+      uniform enforcement, and deny-by-default semantics that don't depend
+      on namespace label hygiene.
+
+      Validates:
+        - runAsNonRoot: true
+        - allowPrivilegeEscalation: false
+        - readOnlyRootFilesystem: true
+        - capabilities.drop: [ALL]
+        - seccompProfile.type: RuntimeDefault
+
+      Wazuh DaemonSet exception (per ADR-07) is handled via PolicyException
+      objects, not by carving holes in this policy. The platform's "what runs
+      privileged?" answer must be a finite, audited list.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: require-run-as-non-root
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "Containers must set runAsNonRoot=true (PSS restricted)."
+        pattern:
+          spec:
+            =(securityContext):
+              =(runAsNonRoot): "true"
+            containers:
+              - =(securityContext):
+                  =(runAsNonRoot): "true"
+
+    - name: disallow-privilege-escalation
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "allowPrivilegeEscalation must be false (PSS restricted)."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  allowPrivilegeEscalation: "false"
+
+    - name: require-read-only-root-fs
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "readOnlyRootFilesystem must be true (PSS restricted; writes go to mounted emptyDir or PVC)."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  readOnlyRootFilesystem: "true"
+
+    - name: drop-all-capabilities
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "All Linux capabilities must be dropped (PSS restricted). Add specific capabilities via `add:` only when justified."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  capabilities:
+                    drop:
+                      - "ALL"
+
+    - name: require-seccomp-runtime-default
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "seccompProfile.type must be RuntimeDefault or Localhost (PSS restricted)."
+        anyPattern:
+          - spec:
+              securityContext:
+                seccompProfile:
+                  type: "RuntimeDefault | Localhost"
+          - spec:
+              containers:
+                - securityContext:
+                    seccompProfile:
+                      type: "RuntimeDefault | Localhost"
+
+    - name: disallow-host-namespaces
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "hostNetwork, hostPID, and hostIPC must not be set or must be false (PSS restricted)."
+        pattern:
+          spec:
+            =(hostNetwork): "false"
+            =(hostPID): "false"
+            =(hostIPC): "false"

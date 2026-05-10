@@ -1,0 +1,106 @@
+{{- /*
+  Wave 4 availability alerts — three-tier request flow visibility.
+
+  ServiceUnavailable        — blackbox probe failing for >2m
+  ALBNoHealthyTargets       — ALB target group reports zero healthy
+  StatefulPodNotReady       — StatefulSet primary pod not Ready for >2m
+  EnvoyRouterUnhealthy      — Envoy router replica count below desired
+  APITierUnhealthy          — API tier replica count below desired
+  BackupScheduleNotRunning  — Velero schedule has not produced a successful
+                              backup within 2x cadence_minutes
+*/ -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "aegis-statefulset.fullname" . }}-availability
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-statefulset.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alerting
+spec:
+  groups:
+    - name: aegis-availability
+      interval: 30s
+      rules:
+        # ----------------------------------------------------------------
+        # ServiceUnavailable — public endpoint probe failing.
+        # ----------------------------------------------------------------
+        - alert: ServiceUnavailable
+          expr: probe_success{job="aegis-blackbox"} == 0
+          for: 2m
+          labels:
+            severity: page
+          annotations:
+            summary: "Public endpoint {{`{{ $labels.instance }}`}} unreachable"
+            description: "Blackbox probe has failed for >2m. Check ALB, DNS, TLS chain."
+            runbook: docs/operations/availability-runbook.md
+
+        # ----------------------------------------------------------------
+        # ALBNoHealthyTargets — ALB target group has zero healthy targets.
+        # Requires CloudWatch exporter or aws-exporter scraping ALB metrics.
+        # ----------------------------------------------------------------
+        - alert: ALBNoHealthyTargets
+          expr: aws_alb_healthy_host_count < 1
+          for: 1m
+          labels:
+            severity: page
+          annotations:
+            summary: "ALB target group {{`{{ $labels.target_group }}`}} has zero healthy targets"
+            description: "All API tier pods are failing health checks. Check pod status and security group."
+
+        # ----------------------------------------------------------------
+        # StatefulPodNotReady — primary StatefulSet pod NotReady.
+        # ----------------------------------------------------------------
+        - alert: StatefulPodNotReady
+          expr: |
+            kube_statefulset_status_replicas_ready{statefulset=~".*-primary"} <
+            kube_statefulset_status_replicas{statefulset=~".*-primary"}
+          for: 2m
+          labels:
+            severity: page
+          annotations:
+            summary: "Stateful primary {{`{{ $labels.statefulset }}`}} pod not Ready"
+            description: "At least one stateful pod has been NotReady for >2m. Check pod logs and PVC binding."
+
+        # ----------------------------------------------------------------
+        # EnvoyRouterUnhealthy — Envoy router replica deficit.
+        # ----------------------------------------------------------------
+        - alert: EnvoyRouterUnhealthy
+          expr: |
+            kube_deployment_status_replicas_ready{deployment=~".*-envoy"} <
+            kube_deployment_spec_replicas{deployment=~".*-envoy"}
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Envoy router has fewer ready replicas than desired"
+            description: "Routing tier degraded — capacity reduced but service still reachable."
+
+        # ----------------------------------------------------------------
+        # APITierUnhealthy — API tier replica deficit.
+        # ----------------------------------------------------------------
+        - alert: APITierUnhealthy
+          expr: |
+            kube_deployment_status_replicas_ready{deployment=~".*-api"} <
+            kube_deployment_spec_replicas{deployment=~".*-api"}
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "API tier has fewer ready replicas than desired"
+            description: "API tier degraded — ALB will route around unhealthy targets but capacity reduced."
+
+        # ----------------------------------------------------------------
+        # BackupScheduleNotRunning — Velero schedule stalled.
+        # Triggers if no successful backup within 2x configured cadence.
+        # ----------------------------------------------------------------
+        - alert: BackupScheduleNotRunning
+          expr: |
+            time() - velero_backup_last_successful_timestamp{schedule="aegis-statefulset-schedule"}
+              > {{ mul .Values.backup.cadence_minutes 60 2 }}
+          for: 5m
+          labels:
+            severity: page
+          annotations:
+            summary: "Velero schedule has not produced a successful backup in 2x cadence"
+            description: "Cold-DR RPO budget at risk. Check Velero pod logs and S3 storage location."

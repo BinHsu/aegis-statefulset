@@ -1,0 +1,47 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: aegis-statefulset
+  namespace: argocd
+spec:
+  description: Stateful workload platform with active-passive HA
+
+  sourceRepos:
+    - https://github.com/BinHsu/aegis-statefulset.git
+    # Observability stack pulled from upstream Helm repo (chart version pinned per ADR-09).
+    - https://prometheus-community.github.io/helm-charts
+
+  destinations:
+    - namespace: aegis-app
+      server: https://kubernetes.default.svc
+    - namespace: aegis-app-dev
+      server: https://kubernetes.default.svc
+    - namespace: observability
+      server: https://kubernetes.default.svc
+
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: storage.k8s.io
+      kind: StorageClass
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+
+  roles:
+    - name: read-only
+      description: Read-only access for engineers and auditors
+      policies:
+        - p, proj:aegis-statefulset:read-only, applications, get, aegis-statefulset/*, allow
+        - p, proj:aegis-statefulset:read-only, applications, sync, aegis-statefulset/*, deny
+    - name: dev-syncer
+      description: Sync access scoped to dev environment only
+      policies:
+        - p, proj:aegis-statefulset:dev-syncer, applications, get, aegis-statefulset/*, allow
+        - p, proj:aegis-statefulset:dev-syncer, applications, sync, aegis-statefulset/aegis-statefulset-dev, allow
+        - p, proj:aegis-statefulset:dev-syncer, applications, sync, aegis-statefulset/aegis-statefulset-prod, deny

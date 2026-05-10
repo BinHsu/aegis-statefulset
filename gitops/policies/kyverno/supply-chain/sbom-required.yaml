@@ -1,0 +1,70 @@
+# Require CycloneDX SBOM attestation on all application images.
+#
+# Implements:
+#   - ADR-09 (SLSA L3 + CycloneDX SBOM + signed provenance)
+#
+# Verifies that the image carries a Sigstore-keyless-signed in-toto
+# attestation with predicate type https://cyclonedx.org/bom, produced by
+# this repo's sbom-attestation.yml workflow.
+#
+# Initial mode: Audit — generates admission events without blocking pods,
+# allowing the team to validate that every image actually has the SBOM
+# attached before promoting to Enforce. Promotion gate: 14 days of green
+# (zero audit failures across all expected images).
+#
+# Once promoted to Enforce: pods without a valid SBOM attestation will not
+# admit. Combined with image-signature-required.yaml, this closes the gap
+# from "image is signed" to "image is signed AND has known composition".
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: sbom-required
+  annotations:
+    policies.kyverno.io/title: Require SBOM Attestation
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: |
+      Per ADR-09 — every image admitted to the production application
+      namespace must carry a CycloneDX SBOM attestation produced by the
+      sbom-attestation.yml workflow on this repository, signed with the
+      GitHub Actions OIDC identity. Audit mode initially; promote to
+      Enforce after 14-day green window.
+spec:
+  validationFailureAction: Audit
+  background: false
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: verify-sbom-attestation
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - aegis-app
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/binhsu/aegis-statefulset/*"
+          attestations:
+            - type: https://cyclonedx.org/bom
+              attestors:
+                - entries:
+                    - keyless:
+                        subject: "https://github.com/BinHsu/aegis-statefulset/*"
+                        issuer: "https://token.actions.githubusercontent.com"
+                        rekor:
+                          url: "https://rekor.sigstore.dev"
+              # Sanity check on the predicate payload — at minimum we expect
+              # CycloneDX metadata indicating the SBOM was generated. Deeper
+              # composition checks (no-known-CVE, license allowlist) belong
+              # in dependency-track downstream, not at admission.
+              conditions:
+                - all:
+                    - key: "{{ bomFormat }}"
+                      operator: Equals
+                      value: "CycloneDX"
+                    - key: "{{ specVersion }}"
+                      operator: GreaterThanOrEquals
+                      value: "1.4"

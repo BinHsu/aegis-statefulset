@@ -1,0 +1,42 @@
+# values-prod.yaml — overrides for production environment.
+# Default values are already production-tuned; this file lists explicit
+# prod choices for traceability.
+# Apply alongside default values.yaml:
+#   helm install aegis ./helm/aegis-statefulset -f values-prod.yaml
+
+stateful:
+  cells:
+    # Production: cells.count = N (set via terraform import per ADR-05
+    # to match existing per-tenant pod inventory).
+    count: 9
+    storage_per_pod: 2Ti
+  resources:
+    requests:
+      cpu: 2
+      memory: 24Gi
+    limits:
+      cpu: 8
+      memory: 32Gi
+  pod_anti_affinity:
+    type: hard
+
+api:
+  replicas: 3
+  pod_anti_affinity:
+    type: hard
+
+envoy:
+  replicas: 3
+  pod_anti_affinity:
+    type: hard
+
+backup:
+  cadence_minutes: 5
+  retention_days: 30
+  cross_region:
+    enabled: true
+
+ha:
+  model: cold_dr
+
+# All other values from values.yaml apply.

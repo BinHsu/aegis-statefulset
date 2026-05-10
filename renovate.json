@@ -1,0 +1,81 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    "schedule:weekly"
+  ],
+  "timezone": "Europe/Berlin",
+  "schedule": ["after 8pm on monday"],
+  "labels": ["renovate", "dependencies"],
+  "commitMessagePrefix": "chore(deps):",
+
+  "pinDigests": true,
+  "rangeStrategy": "pin",
+
+  "packageRules": [
+    {
+      "description": "Auto-merge for digest and patch bumps on GitHub Actions (per ADR-039 — SHA pinning is the integrity primitive; patch within a pinned major is the lowest-risk update class).",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["digest", "patch"],
+      "automerge": true,
+      "automergeType": "branch"
+    },
+    {
+      "description": "Manual review required for major version bumps. Major bumps can include breaking config changes that the per-PR review must catch before merge.",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "addLabels": ["review-required"]
+    },
+    {
+      "description": "Stateful tier images — manual review only (per ADR-038 anti-stomp). The aegis-statefulset application image and embedded LevelDB updates can affect the on-disk format; review against the change log every time.",
+      "matchPackagePatterns": ["aegis-statefulset", "leveldb"],
+      "automerge": false,
+      "addLabels": ["stateful-review-required"]
+    },
+    {
+      "description": "Helm charts — pin to OCI digest, not version (per ADR-039). Renovate's helmv3 manager rewrites tag references to sha256 digests on first encounter.",
+      "matchManagers": ["helm-values", "helmv3"],
+      "pinDigests": true,
+      "rangeStrategy": "pin"
+    },
+    {
+      "description": "Container images in Dockerfiles and Helm values — same digest pinning posture as Helm charts.",
+      "matchManagers": ["dockerfile", "kubernetes"],
+      "pinDigests": true,
+      "rangeStrategy": "pin"
+    },
+    {
+      "description": "Terraform providers — pin to specific versions, no auto-merge. Provider upgrades can rewrite state schema; reviewer checks the upgrade guide before merging.",
+      "matchManagers": ["terraform"],
+      "matchDepTypes": ["required_provider"],
+      "automerge": false,
+      "addLabels": ["terraform-provider-bump"]
+    }
+  ],
+
+  "regexManagers": [
+    {
+      "description": "Pin Terraform module SHA references (per ADR-039). Matches `source = \"git::...?ref=<40-char-sha>\"` in .tf files.",
+      "fileMatch": ["\\.tf$"],
+      "matchStrings": [
+        "source\\s*=\\s*\"git::(?<depName>[^\"?]+)\\?ref=(?<currentValue>[a-f0-9]{40})\""
+      ],
+      "datasourceTemplate": "git-refs"
+    }
+  ],
+
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "addLabels": ["security"]
+  },
+
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+
+  "ignorePaths": [
+    "_context/**",
+    ".claude-rules/**"
+  ]
+}

@@ -1,0 +1,126 @@
+# ApplicationSet — multi-environment fan-out for the aegis-statefulset Helm chart.
+#
+# WHY ApplicationSet over flat Application manifests:
+#   Single template parameterised by a list generator produces one Application
+#   per environment. Adding a new env (regional clone, canary cell) is a single
+#   list element, not a copy-pasted manifest. See ADR-08 for the full rationale.
+#
+# REVISION pinning (per ADR-09 + ADR-08):
+#   - dev:     `main` — tracks trunk; failure is cheap and self-recovering.
+#   - staging: specific SHA — soak chamber; pinned via promotion PR.
+#   - prod:    specific SHA — stateful tier; pinned via promotion PR; MUST be SHA.
+#   The TODO markers below stay in `main` as `main` (illegal for staging/prod
+#   long-term). Promotion PRs replace these with immutable SHAs before any
+#   live workload runs in those envs.
+#
+# SYNC policy split (per ADR-08):
+#   The ApplicationSet template renders a uniform `syncPolicy.syncOptions`
+#   block for all environments. The auto-sync `automated:` block is INTENTIONALLY
+#   absent from this template — ArgoCD ApplicationSet's pure-templating model
+#   doesn't cleanly express per-element conditional `automated{}`. POC posture:
+#     - The dedicated `gitops/argocd/applications/aegis-statefulset-prod.yaml`
+#       Application (Wave 1, manual sync, no automated block) remains the
+#       authoritative prod manifest.
+#     - This ApplicationSet covers dev + staging only at runtime; the prod
+#       element is included for documentation completeness and to make the
+#       promotion-PR diff legible (operators see all three pins side-by-side
+#       in a single file when planning a release).
+#   The fully unified path (templated automated block via Go-template if/else
+#   over `syncPolicyMode`) is described in `docs/gitops/promotion-model.md`
+#   under "Future work." See ADR-08 trade-offs for the reasoning.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: aegis-statefulset
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+
+  generators:
+    - list:
+        elements:
+          - env: dev
+            targetRevision: main
+            valuesFile: values-dev.yaml
+            namespace: aegis-app-dev
+            syncPolicyMode: auto
+          - env: staging
+            # TODO: bump to specific SHA after dev soak via promotion PR.
+            # Per ADR-08, staging targetRevision MUST become an immutable SHA
+            # before staging carries production-shaped traffic.
+            targetRevision: main
+            valuesFile: values-staging.yaml
+            namespace: aegis-app-staging
+            syncPolicyMode: auto
+          - env: prod
+            # MUST be specific SHA, not branch (per ADR-08 + ADR-09).
+            # TODO: pin to immutable SHA via promotion PR before first prod sync.
+            # The dedicated aegis-statefulset-prod.yaml Application is the
+            # authoritative manual-sync gate; this entry exists for visibility
+            # of the full promotion chain in one place.
+            targetRevision: main
+            valuesFile: values-prod.yaml
+            namespace: aegis-app
+            syncPolicyMode: manual
+
+  template:
+    metadata:
+      name: 'aegis-statefulset-{{.env}}'
+      namespace: argocd
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+      labels:
+        aegis.io/component: aegis-statefulset
+        aegis.io/env: '{{.env}}'
+        aegis.io/managed-by: applicationset
+    spec:
+      project: aegis-statefulset
+      source:
+        repoURL: https://github.com/BinHsu/aegis-statefulset.git
+        targetRevision: '{{.targetRevision}}'
+        path: helm/aegis-statefulset
+        helm:
+          valueFiles:
+            - values.yaml
+            - '{{.valuesFile}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{.namespace}}'
+      syncPolicy:
+        # Note: per the comment block at file head, the `automated{}` block is
+        # INTENTIONALLY absent from this template. Per-env auto-sync is
+        # enforced for dev/staging via post-creation patching (see promotion
+        # runbook) or by a future templated `if/else` over syncPolicyMode.
+        # Prod sync is enforced manual via the dedicated prod Application.
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+          - Validate=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
+
+  # Rolling rollout strategy: dev first, then staging, then prod.
+  # When the ApplicationSet itself changes (template edit), ArgoCD applies
+  # the change one env at a time, in this order. Prevents a malformed
+  # template from updating all three Applications simultaneously.
+  strategy:
+    type: RollingSync
+    rollingSync:
+      steps:
+        - matchExpressions:
+            - key: aegis.io/env
+              operator: In
+              values: [dev]
+        - matchExpressions:
+            - key: aegis.io/env
+              operator: In
+              values: [staging]
+        - matchExpressions:
+            - key: aegis.io/env
+              operator: In
+              values: [prod]

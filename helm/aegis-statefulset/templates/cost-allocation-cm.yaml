@@ -1,0 +1,22 @@
+{{- if .Values.finops.cost_dimensions.enabled }}
+# Cost allocation dimensions surfaced to in-cluster cost tooling.
+# Per ADR-10 — these dimensions are the join keys between Kubernetes pod
+# labels and the CUR / Athena pipeline (per-tenant cost attribution).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "aegis-statefulset.fullname" . }}-cost-dimensions
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-statefulset.labels" . | nindent 4 }}
+    app.kubernetes.io/component: finops
+data:
+  # Exposed to in-cluster cost tooling (OpenCost / Kubecost) and to the
+  # placement service that stamps tenant_label_key on each pod.
+  tenant_label_key: {{ .Values.finops.cost_dimensions.tenant_label_key | quote }}
+  component:        {{ .Values.finops.cost_dimensions.component | quote }}
+  tier:             {{ .Values.finops.cost_dimensions.tier | quote }}
+  data_class:       {{ .Values.finops.cost_dimensions.data_class | quote }}
+  scrape_enabled:   {{ .Values.finops.cost_metrics.scrape_enabled | quote }}
+  annotation_prefix: {{ .Values.finops.cost_metrics.annotation_prefix | quote }}
+{{- end }}

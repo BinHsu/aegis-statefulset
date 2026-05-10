@@ -1,0 +1,76 @@
+# Helm Release — packages and publishes the chart on tag push.
+#
+# Implements:
+#   - ADR-034 (pipeline four-workflow split — this is the release workflow)
+#   - ADR-032 (Cosign signing for supply-chain integrity)
+#   - ADR-039 (SHA-pinned actions)
+#
+# Trigger: push of a tag matching `helm-v*` (e.g. helm-v0.1.0).
+# Output:
+#   - OCI artifact at ghcr.io/<owner>/aegis-statefulset:<version>
+#   - Cosign keyless signature on the chart digest
+
+name: Helm Release
+
+on:
+  push:
+    tags:
+      - 'helm-v*'
+
+permissions:
+  contents: write   # needed for release creation
+  packages: write   # needed for OCI registry push to GHCR
+  id-token: write   # needed for Cosign keyless signing (OIDC)
+
+jobs:
+  release:
+    name: Package and publish chart
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - name: Setup Helm
+        uses: azure/setup-helm@b7246b12e77f7134dc2d460a3d5bad15bbe29390  # v4.1.0
+        with:
+          version: '3.13.3'
+
+      - name: Login to GHCR
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login ghcr.io \
+                --username "${{ github.actor }}" \
+                --password-stdin
+
+      - name: Package chart
+        run: |
+          set -euo pipefail
+          helm package helm/aegis-statefulset/
+
+      - name: Push chart to GHCR
+        id: push
+        run: |
+          set -euo pipefail
+          chart_pkg=$(ls aegis-statefulset-*.tgz | head -1)
+          push_output=$(helm push "$chart_pkg" "oci://ghcr.io/${{ github.repository_owner }}" 2>&1)
+          echo "$push_output"
+          digest=$(echo "$push_output" | awk -F': ' '/Digest/ {print $2}')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      # ADR-032: keyless Cosign signing via OIDC. No long-lived signing key.
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@e1523de7571e31dbe865fd2e80c5c7c23ae71eb4  # v3.4.0 — TODO verify SHA via Renovate
+
+      - name: Sign chart with Cosign
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DIGEST:-}" ]; then
+            echo "::error::Chart digest not captured from helm push output."
+            exit 1
+          fi
+          cosign sign --yes \
+            "ghcr.io/${{ github.repository_owner }}/aegis-statefulset@${DIGEST}"

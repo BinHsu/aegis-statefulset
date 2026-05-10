@@ -1,0 +1,31 @@
+# CODEOWNERS — review routing for this repository.
+#
+# Format: <pattern> <owner1> <owner2> ...
+# Last matching pattern takes precedence.
+
+# Default owner for everything not matched below
+*                                                                @BinHsu
+
+# ADR changes — architectural decisions, require deliberate review
+/_context/adr/                                                   @BinHsu
+
+# Stateful tier — high blast radius (data on EBS, replication semantics)
+/helm/aegis-statefulset/templates/statefulset-primary.yaml       @BinHsu
+/helm/aegis-statefulset/templates/statefulset-standby.yaml       @BinHsu
+/helm/aegis-statefulset/templates/backup-cronjob.yaml            @BinHsu
+/helm/aegis-statefulset/templates/standby-refresh-cronjob.yaml   @BinHsu
+
+# Infrastructure — node groups, KMS, networking carry production risk
+/infrastructure/terraform/node-groups-stateful.tf                @BinHsu
+/infrastructure/terraform/kms.tf                                 @BinHsu
+/infrastructure/terraform/vpc.tf                                 @BinHsu
+/infrastructure/terraform/lifecycle-hooks.tf                     @BinHsu
+/infrastructure/terraform/secrets-manager.tf                     @BinHsu
+
+# Failover and DR scripts — operational impact during incidents
+/scripts/failover/                                               @BinHsu
+/scripts/dr/                                                     @BinHsu
+
+# CI workflows — gates protect the rest of the repo
+/.github/workflows/                                              @BinHsu
+/.github/CODEOWNERS                                              @BinHsu

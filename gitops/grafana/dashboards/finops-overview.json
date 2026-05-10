@@ -1,0 +1,286 @@
+{
+  "__comment": "FinOps overview dashboard per ADR-040. Skeleton — Athena query bodies are placeholder strings keyed off the CUR schema declared in infrastructure/terraform/finops-cur-athena.tf. Fill in actual SQL after first CUR delivery cycle (24-48h post-apply). Datasource UIDs are environment-specific; keep ${DS_*} variables and resolve at provisioning time via the Grafana provider's datasource binding.",
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": "${DS_CLOUDWATCH}",
+        "enable": true,
+        "iconColor": "red",
+        "name": "Cost Anomaly Alerts",
+        "query": "namespace=AWS/Billing"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [
+    {
+      "icon": "external link",
+      "tags": ["finops", "adr-040"],
+      "title": "FinOps Discipline Runbook",
+      "type": "link",
+      "url": "/docs/finops/finops-discipline.md"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Monthly burn rate",
+      "description": "Project-wide spend trend, current month vs prior 3 months. Source: CUR via Athena.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "rawSQL": "SELECT date_trunc('day', usage_start_date) AS time, SUM(line_item_unblended_cost) AS cost_usd FROM cur_view WHERE usage_start_date >= date_trunc('month', current_date - interval '3' month) GROUP BY 1 ORDER BY 1",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Cost by tier",
+      "description": "Stateful / stateless / shared / observability split. Source: CUR Tier tag.",
+      "type": "piechart",
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "rawSQL": "SELECT resource_tags_user_tier AS tier, SUM(line_item_unblended_cost) AS cost FROM cur_view WHERE billing_period_start = date_trunc('month', current_date) GROUP BY 1 ORDER BY 2 DESC",
+          "format": 1
+        }
+      ],
+      "options": {
+        "legend": {"displayMode": "table", "values": ["value", "percent"]}
+      },
+      "fieldConfig": {
+        "defaults": {"unit": "currencyUSD"}
+      }
+    },
+    {
+      "id": 3,
+      "title": "Cost by component",
+      "description": "Backup / network / KMS / Logs / stateful / stateless / observability. Source: CUR Component tag.",
+      "type": "barchart",
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "rawSQL": "SELECT resource_tags_user_component AS component, SUM(line_item_unblended_cost) AS cost FROM cur_view WHERE billing_period_start = date_trunc('month', current_date) GROUP BY 1 ORDER BY 2 DESC",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "currencyUSD"}
+      }
+    },
+    {
+      "id": 4,
+      "title": "Top 10 tenants by cost (current month)",
+      "description": "Per-tenant attribution. Joins CUR with tenant cost dimension propagated from pod label aegis.io/tenant-id via Container Insights. See scripts/finops/per-tenant-cost-attribution.sql Q1.",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "rawSQL": "-- See scripts/finops/per-tenant-cost-attribution.sql Q1\nSELECT tenant_id, SUM(compute_cost) AS compute, SUM(storage_cost) AS storage, SUM(backup_cost) AS backup, SUM(total_cost) AS total FROM tenant_cost_view WHERE billing_period_start = date_trunc('month', current_date) GROUP BY 1 ORDER BY total DESC LIMIT 10",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "currencyUSD"},
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "tenant_id"},
+            "properties": [{"id": "unit", "value": "string"}]
+          }
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "title": "Cost anomalies (7d)",
+      "description": "Count of anomalies detected by AWS Cost Anomaly Detector with absolute impact ≥ $100. Source: CloudWatch metric.",
+      "type": "stat",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "${DS_CLOUDWATCH}"
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 18},
+      "targets": [
+        {
+          "refId": "A",
+          "namespace": "AWS/CE",
+          "metricName": "AnomalyCount",
+          "statistic": "Sum",
+          "period": "86400"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 3}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Budget headroom (current month)",
+      "description": "Percentage of monthly budget consumed. Source: AWS Budgets via CloudWatch.",
+      "type": "gauge",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "${DS_CLOUDWATCH}"
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 18},
+      "targets": [
+        {
+          "refId": "A",
+          "namespace": "AWS/Billing",
+          "metricName": "EstimatedCharges",
+          "statistic": "Maximum",
+          "period": "86400",
+          "dimensions": {"Currency": "USD"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 50},
+              {"color": "orange", "value": 80},
+              {"color": "red", "value": 100}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Unit economics — $/tenant/month",
+      "description": "Average cost per active tenant per month. Trend visible across consolidation, SP commitment, scale events.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 18},
+      "targets": [
+        {
+          "refId": "A",
+          "rawSQL": "SELECT date_trunc('month', billing_period_start) AS time, SUM(total_cost) / COUNT(DISTINCT tenant_id) AS cost_per_tenant FROM tenant_cost_view WHERE billing_period_start >= date_trunc('month', current_date - interval '6' month) GROUP BY 1 ORDER BY 1",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "currencyUSD"}
+      }
+    },
+    {
+      "id": 8,
+      "title": "Savings Plan utilisation (7d)",
+      "description": "SP commitment used / committed. <80% sustained = SP over-provisioned; >100% = uncovered on-demand spend. See scripts/finops/per-tenant-cost-attribution.sql Q4.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 26},
+      "targets": [
+        {
+          "refId": "A",
+          "rawSQL": "-- See scripts/finops/per-tenant-cost-attribution.sql Q4\nSELECT usage_date AS time, sp_utilization_pct FROM savings_plan_utilisation_view WHERE usage_date >= current_date - interval '7' day ORDER BY usage_date",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 120
+        }
+      }
+    }
+  ],
+  "refresh": "1h",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["finops", "adr-040", "cost"],
+  "templating": {
+    "list": [
+      {
+        "name": "DS_ATHENA",
+        "type": "datasource",
+        "query": "grafana-athena-datasource",
+        "current": {}
+      },
+      {
+        "name": "DS_CLOUDWATCH",
+        "type": "datasource",
+        "query": "cloudwatch",
+        "current": {}
+      },
+      {
+        "name": "environment",
+        "type": "custom",
+        "label": "Environment",
+        "query": "dev,staging,prod",
+        "current": {"selected": true, "text": "prod", "value": "prod"}
+      }
+    ]
+  },
+  "time": {"from": "now-30d", "to": "now"},
+  "timepicker": {},
+  "timezone": "Europe/Berlin",
+  "title": "FinOps Overview (per ADR-040)",
+  "uid": "aegis-finops-overview",
+  "version": 1,
+  "weekStart": ""
+}

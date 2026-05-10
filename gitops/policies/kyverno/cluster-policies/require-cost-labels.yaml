@@ -1,0 +1,108 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-cost-labels
+  annotations:
+    policies.kyverno.io/title: Require FinOps Cost-Attribution Labels
+    policies.kyverno.io/category: FinOps
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: |
+      Per ADR-10 (FinOps tagging), every workload pod must carry the
+      cost-attribution label triple:
+        - aegis.io/component   — which logical component (e.g. statefulset,
+                                  envoy-router, observability)
+        - aegis.io/tier        — stateful | stateless | platform
+        - aegis.io/data-class  — customer-data | telemetry | platform-config
+
+      OpenCost rolls up cost by these labels. A pod without them shows up
+      as "unallocated cost" in the FinOps dashboard, which silently breaks
+      tenant cost attribution and capacity planning.
+
+      AUDIT mode at first introduction: the policy reports violations via
+      Kyverno PolicyReport without blocking pod creation. Once existing
+      workloads are labelled (grace period: 14 days), promote to ENFORCE
+      by changing `validationFailureAction` to `Enforce` in a follow-up PR.
+      This is the canonical "introduce a constraint without breaking
+      production" rollout shape — same pattern applies to any new policy.
+spec:
+  # Audit mode — Bin promotes to Enforce after the 14-day grace window
+  # (tracked via Issue, see promotion-model.md).
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: require-cost-labels-on-pods
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      # Skip system namespaces — kube-system, kyverno, argocd are platform
+      # infrastructure, accounted for in platform overhead, not per-tenant.
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+                - kyverno
+                - argocd
+                - cert-manager
+                - external-secrets
+      validate:
+        message: "Per ADR-10 (FinOps), pods must carry aegis.io/component, aegis.io/tier, aegis.io/data-class labels."
+        pattern:
+          metadata:
+            labels:
+              aegis.io/component: "?*"
+              aegis.io/tier: "?*"
+              aegis.io/data-class: "?*"
+
+    - name: validate-tier-enum
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+                - kyverno
+                - argocd
+                - cert-manager
+                - external-secrets
+      validate:
+        message: "aegis.io/tier must be one of: stateful, stateless, platform."
+        pattern:
+          metadata:
+            labels:
+              aegis.io/tier: "stateful | stateless | platform"
+
+    - name: validate-data-class-enum
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+                - kyverno
+                - argocd
+                - cert-manager
+                - external-secrets
+      validate:
+        message: "aegis.io/data-class must be one of: customer-data, telemetry, platform-config."
+        pattern:
+          metadata:
+            labels:
+              aegis.io/data-class: "customer-data | telemetry | platform-config"

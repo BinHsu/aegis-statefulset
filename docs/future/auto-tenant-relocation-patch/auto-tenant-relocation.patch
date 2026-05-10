@@ -1,0 +1,233 @@
+From: aegis-statefulset architecture team
+Subject: [PATCH] Auto-relocate hot tenants on schedule via bin-packing controller
+Date: 2026-05-10
+References: docs/operations/automation-tiers.md § 2d, ADR-04
+
+This patch flips per-tenant relocation from manual-runbook to
+scheduled-automatic. A custom controller runs daily inside a customer-
+specified maintenance window, identifies hot tenants via per-tenant
+metrics, and schedules relocations bounded by `max_per_window`.
+
+Apply only after Stage 3 establishes the customer's hot-tenant frequency
+makes manual relocation an operational burden AND the customer's tenants
+tolerate brief unavailability during the maintenance window.
+
+Files added:
+  1. helm/aegis-statefulset/templates/relocation-controller.yaml
+  2. infrastructure/lambda/relocation-controller/relocator.py
+
+Files modified:
+  3. helm/aegis-statefulset/values.yaml  (+4 flags, default off)
+
+Apply: git apply docs/future/auto-tenant-relocation-patch/auto-tenant-relocation.patch
+
+---
+
+diff --git a/helm/aegis-statefulset/templates/relocation-controller.yaml b/helm/aegis-statefulset/templates/relocation-controller.yaml
+new file mode 100644
+--- /dev/null
++++ b/helm/aegis-statefulset/templates/relocation-controller.yaml
+@@ -0,0 +1,86 @@
++# Per-tenant relocation controller — auto-schedules hot-tenant moves
++# during the customer-specified maintenance window.
++#
++# Per docs/operations/automation-tiers.md § 2d. Disabled by default;
++# enable only when customer's hot-tenant frequency justifies + tenants
++# tolerate brief unavailability during maintenance.
++
++{{- if .Values.relocation.auto_trigger.enabled }}
++apiVersion: v1
++kind: ServiceAccount
++metadata:
++  name: relocation-controller
++  namespace: {{ .Release.Namespace }}
++---
++apiVersion: rbac.authorization.k8s.io/v1
++kind: Role
++metadata:
++  name: relocation-controller
++  namespace: {{ .Release.Namespace }}
++rules:
++  - apiGroups: [""]
++    resources: ["configmaps"]
++    verbs: ["get", "list", "watch"]
++  - apiGroups: ["batch"]
++    resources: ["jobs"]
++    verbs: ["create", "get", "list"]
++---
++apiVersion: rbac.authorization.k8s.io/v1
++kind: RoleBinding
++metadata:
++  name: relocation-controller
++  namespace: {{ .Release.Namespace }}
++roleRef:
++  apiGroup: rbac.authorization.k8s.io
++  kind: Role
++  name: relocation-controller
++subjects:
++  - kind: ServiceAccount
++    name: relocation-controller
++    namespace: {{ .Release.Namespace }}
++---
++apiVersion: batch/v1
++kind: CronJob
++metadata:
++  name: relocation-controller
++  namespace: {{ .Release.Namespace }}
++spec:
++  schedule: {{ .Values.relocation.auto_trigger.maintenance_window | quote }}
++  jobTemplate:
++    spec:
++      template:
++        spec:
++          serviceAccountName: relocation-controller
++          restartPolicy: OnFailure
++          securityContext:
++            runAsNonRoot: true
++            runAsUser: 65532
++            seccompProfile:
++              type: RuntimeDefault
++          containers:
++            - name: relocator
++              image: {{ .Values.relocation.auto_trigger.image.repository }}:{{ .Values.relocation.auto_trigger.image.tag }}@{{ .Values.relocation.auto_trigger.image.digest }}
++              env:
++                - name: NAMESPACE
++                  value: {{ .Release.Namespace }}
++                - name: HOT_TENANT_THRESHOLD_PCT
++                  value: {{ .Values.relocation.auto_trigger.hot_threshold_pct | quote }}
++                - name: MAX_RELOCATIONS_PER_WINDOW
++                  value: {{ .Values.relocation.auto_trigger.max_per_window | quote }}
++                - name: LOG_LEVEL
++                  value: INFO
++              resources:
++                requests:
++                  cpu: 100m
++                  memory: 256Mi
++                limits:
++                  cpu: 500m
++                  memory: 512Mi
++              securityContext:
++                allowPrivilegeEscalation: false
++                readOnlyRootFilesystem: true
++                capabilities:
++                  drop: ["ALL"]
++{{- end }}
+diff --git a/infrastructure/lambda/relocation-controller/relocator.py b/infrastructure/lambda/relocation-controller/relocator.py
+new file mode 100644
+--- /dev/null
++++ b/infrastructure/lambda/relocation-controller/relocator.py
+@@ -0,0 +1,107 @@
++"""
++Relocation controller — runs as CronJob in customer's maintenance window.
++Identifies hot tenants from per-tenant metrics ConfigMap; schedules
++relocations bounded by MAX_RELOCATIONS_PER_WINDOW; emits a Job per move
++that invokes scripts/relocation/per-tenant-relocate.sh via SSM Run Command.
++
++Per docs/operations/automation-tiers.md § 2d.
++
++Build:
++    cd infrastructure/lambda/relocation-controller
++    docker build -t relocation-controller:v0.1 -f Dockerfile .
++    docker push <registry>/relocation-controller:v0.1
++"""
++
++import json
++import logging
++import os
++from datetime import datetime, timezone
++
++from kubernetes import client, config
++
++log = logging.getLogger()
++log.setLevel(os.getenv("LOG_LEVEL", "INFO"))
++
++NAMESPACE = os.environ["NAMESPACE"]
++HOT_THRESHOLD = float(os.environ.get("HOT_TENANT_THRESHOLD_PCT", "70"))
++MAX_RELOCATIONS = int(os.environ.get("MAX_RELOCATIONS_PER_WINDOW", "3"))
++
++config.load_incluster_config()
++core = client.CoreV1Api()
++batch = client.BatchV1Api()
++
++
++def fetch_per_tenant_metrics() -> list[dict]:
++    """Read tenant metrics from ConfigMap (Prometheus federation populates)."""
++    try:
++        cm = core.read_namespaced_config_map("per-tenant-metrics-cache", NAMESPACE)
++        return [json.loads(v) for v in cm.data.values()]
++    except Exception as e:
++        log.error("Could not read per-tenant metrics: %s", e)
++        return []
++
++
++def identify_hot_tenants(metrics: list[dict]) -> list[dict]:
++    """A tenant is 'hot' if its IOPS share or storage share exceeds threshold."""
++    hot = []
++    for m in metrics:
++        if m.get("iops_share_pct", 0) > HOT_THRESHOLD or m.get("storage_share_pct", 0) > HOT_THRESHOLD:
++            hot.append(m)
++    # Sort hottest first
++    hot.sort(key=lambda m: m.get("iops_share_pct", 0) + m.get("storage_share_pct", 0), reverse=True)
++    return hot
++
++
++def find_target_cell(tenant: dict, all_cells: list[str]) -> str | None:
++    """Find a less-loaded cell to receive this tenant. Naive: pick the cell
++    with lowest total storage_share."""
++    source_cell = tenant.get("current_cell")
++    candidates = [c for c in all_cells if c != source_cell]
++    if not candidates:
++        return None
++    # In production, look up per-cell totals; this is the placeholder skeleton
++    return candidates[0]
++
++
++def schedule_relocation_job(tenant_id: str, source: str, target: str):
++    """Create a Kubernetes Job that runs per-tenant-relocate.sh."""
++    job = client.V1Job(
++        metadata=client.V1ObjectMeta(
++            name=f"relocate-{tenant_id}-{int(datetime.now(timezone.utc).timestamp())}",
++            namespace=NAMESPACE,
++        ),
++        spec=client.V1JobSpec(
++            template=client.V1PodTemplateSpec(
++                spec=client.V1PodSpec(
++                    restart_policy="OnFailure",
++                    containers=[client.V1Container(
++                        name="relocate",
++                        image="amazonlinux:2023@sha256:TODO",
++                        command=["/bin/sh", "-c"],
++                        args=[f"aws ssm send-command --targets Key=tag:Role,Values=ops-bastion "
++                              f"--document-name AWS-RunShellScript --parameters "
++                              f"'commands=[\"/usr/local/bin/per-tenant-relocate.sh "
++                              f"--tenant {tenant_id} --from {source} --to {target}\"]'"],
++                    )],
++                ),
++            ),
++        ),
++    )
++    batch.create_namespaced_job(namespace=NAMESPACE, body=job)
++    log.info("Scheduled relocation: tenant=%s source=%s target=%s", tenant_id, source, target)
++
++
++def main():
++    log.info("relocation-controller cycle starting; threshold=%.0f%%, max=%d", HOT_THRESHOLD, MAX_RELOCATIONS)
++    metrics = fetch_per_tenant_metrics()
++    hot = identify_hot_tenants(metrics)
++    log.info("Found %d hot tenants out of %d total", len(hot), len(metrics))
++
++    all_cells = list(set(m.get("current_cell") for m in metrics if m.get("current_cell")))
++    relocations = 0
++    for tenant in hot[:MAX_RELOCATIONS]:
++        target = find_target_cell(tenant, all_cells)
++        if not target:
++            log.warning("No suitable target cell for tenant %s", tenant.get("tenant_id"))
++            continue
++        schedule_relocation_job(tenant["tenant_id"], tenant["current_cell"], target)
++        relocations += 1
++
++    log.info("Cycle complete: %d relocations scheduled", relocations)
++
++
++if __name__ == "__main__":
++    main()

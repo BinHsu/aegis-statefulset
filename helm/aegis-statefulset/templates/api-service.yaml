@@ -1,0 +1,22 @@
+# Service for stateless API tier.
+# ClusterIP — bound to ALB Target Group via TargetGroupBinding (api-tgb.yaml).
+{{- if .Values.api.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "aegis-statefulset.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-statefulset.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api-tier
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "aegis-statefulset.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api-tier
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+{{- end }}

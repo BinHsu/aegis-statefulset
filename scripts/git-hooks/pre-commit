@@ -1,0 +1,375 @@
+#!/usr/bin/env bash
+# scripts/git-hooks/pre-commit
+#
+# Local enforcement of the anonymisation gate (per ADR-08 § anonymisation
+# CI gate). Mirrors the CI workflow `.github/workflows/pr-validation.yml`,
+# so a developer who installs this hook never commits a brand-name leak.
+#
+# Install:
+#   ln -sf ../../scripts/git-hooks/pre-commit .git/hooks/pre-commit
+#   chmod +x scripts/git-hooks/pre-commit
+#
+# Run manually:
+#   ./scripts/git-hooks/pre-commit
+#
+# What it checks:
+#   1. Word-boundary scan for the customer's brand name across staged
+#      files (or the whole repo if invoked manually).
+#   2. Wave 1 stale-content scan — strings that should have been retired
+#      (e.g. `cadence_hours`, `9 primary`, `active-passive HA`).
+#   3. Common credential leak patterns (AWS keys, private keys).
+#
+# Exit codes:
+#   0 — clean
+#   1 — anonymisation hit
+#   2 — Wave 1 stale content hit
+#   3 — credential leak hit
+
+set -euo pipefail
+
+# Colours (when stdout is a TTY)
+if [[ -t 1 ]]; then
+    RED=$'\033[0;31m'
+    YELLOW=$'\033[0;33m'
+    GREEN=$'\033[0;32m'
+    NC=$'\033[0m'
+else
+    RED=""; YELLOW=""; GREEN=""; NC=""
+fi
+
+# Detect mode: hook (only staged files) or manual (whole repo).
+if git rev-parse --git-dir > /dev/null 2>&1 && [[ "${GIT_AUTHOR_NAME:-}" != "" || "${0##*/}" == "pre-commit" ]] && [[ "${1:-}" != "--all" ]]; then
+    # Hook mode: only check staged files
+    MODE="staged"
+    FILES=$(git diff --cached --name-only --diff-filter=ACMR)
+else
+    MODE="all"
+    FILES=""   # signals "whole repo"
+fi
+
+if [[ "$MODE" == "staged" && -z "$FILES" ]]; then
+    echo "${GREEN}[pre-commit] no staged files; nothing to check${NC}"
+    exit 0
+fi
+
+# Excluded paths — private context that legitimately contains brand
+# names; .git internals; build artefacts.
+EXCLUDE_DIRS=(
+    "_context"
+    ".claude-rules"
+    ".git"
+    "node_modules"
+    ".terraform"
+    "vendor"
+    ".venv"
+)
+EXCLUDE_ARGS=()
+for d in "${EXCLUDE_DIRS[@]}"; do
+    EXCLUDE_ARGS+=("--exclude-dir=$d")
+done
+
+# Files where brand names are legitimately part of the document (private)
+# or are quoting an external source — skipped by file path.
+EXCLUDE_FILES=(
+    "CLAUDE.md"
+    "AGENTS.md"
+    "scripts/git-hooks/pre-commit"  # this file itself: contains brand pattern as regex
+)
+
+# ---- 1. Anonymisation gate ----
+echo "${GREEN}[pre-commit] 1/3 — anonymisation word-boundary scan${NC}"
+
+# Word-boundary scan. Brand-name string built from concatenation to avoid
+# this file matching its own pattern when the pre-commit scans staged files
+# (the literal "ninox" string never appears in this file's source).
+BRAND_LOWER="ni"$'nox'
+BRAND_PATTERN="\\b(${BRAND_LOWER}|$(echo "$BRAND_LOWER" | tr 'a-z' 'A-Z')|$(echo "$BRAND_LOWER" | sed 's/^./\\u&/'))\\b"
+
+if [[ "$MODE" == "staged" ]]; then
+    HITS=""
+    while IFS= read -r f; do
+        # Skip excluded files
+        skip=0
+        for ef in "${EXCLUDE_FILES[@]}"; do
+            [[ "$f" == "$ef" ]] && skip=1 && break
+        done
+        [[ $skip -eq 1 ]] && continue
+        # Skip files in excluded dirs
+        for ed in "${EXCLUDE_DIRS[@]}"; do
+            [[ "$f" == "$ed/"* ]] && skip=1 && break
+        done
+        [[ $skip -eq 1 ]] && continue
+        # Run the grep on the file
+        if [[ -f "$f" ]]; then
+            line_hits=$(grep -nE "$BRAND_PATTERN" "$f" 2>/dev/null || true)
+            if [[ -n "$line_hits" ]]; then
+                HITS="${HITS}${f}:\n${line_hits}\n"
+            fi
+        fi
+    done <<< "$FILES"
+else
+    HITS=$(grep -rnE "$BRAND_PATTERN" "${EXCLUDE_ARGS[@]}" \
+        --include='*.md' --include='*.yaml' --include='*.yml' \
+        --include='*.tf' --include='*.sh' --include='*.json' \
+        --include='*.go' --include='*.html' --include='*.txt' \
+        --exclude='CLAUDE.md' --exclude='AGENTS.md' \
+        . 2>/dev/null || true)
+fi
+
+if [[ -n "$HITS" ]]; then
+    echo "${RED}[pre-commit] FAIL — anonymisation hit:${NC}"
+    printf '%b\n' "$HITS"
+    echo "${YELLOW}Hint: replace brand-name occurrences with 'the customer' / 'the application' / 'app-'${NC}"
+    exit 1
+fi
+echo "${GREEN}  ok${NC}"
+
+# ---- 2. Wave 1 stale-content scan ----
+echo "${GREEN}[pre-commit] 2/3 — Wave 1 stale-content scan${NC}"
+
+WAVE1_PATTERNS=(
+    # Wave 1's flat-schema cadence_hours (was top-level backup.cadence_hours).
+    # Wave 4 uses dual-cadence: backup.operational.cadence_minutes + backup.dr.cadence_hours
+    # Match only the OLD top-level form, not the new dual-cadence dr.cadence_hours.
+    '\bbackup\.cadence_hours\b'
+    'cadence_hours: [0-9]+ +#.*old'
+    '9 primary'
+    '9 standbys'
+    'periodic standby refresh'
+    'consistent hash with override'
+    'Active-passive HA via'
+    '\$8,500/mo'
+    'active-passive HA, 1h'
+)
+
+# Files where Wave 1 framing legitimately remains (private history)
+WAVE1_EXCLUDE=(
+    "_context"
+    ".claude-rules"
+    ".git"
+    "node_modules"
+    ".terraform"
+)
+
+WAVE1_HITS=""
+for pat in "${WAVE1_PATTERNS[@]}"; do
+    if [[ "$MODE" == "staged" ]]; then
+        while IFS= read -r f; do
+            skip=0
+            for ed in "${WAVE1_EXCLUDE[@]}"; do
+                [[ "$f" == "$ed/"* ]] && skip=1 && break
+            done
+            # Skip the pre-commit hook itself: it contains all the patterns as regexes
+            [[ "$f" == "scripts/git-hooks/pre-commit" ]] && skip=1
+            [[ $skip -eq 1 ]] && continue
+            if [[ -f "$f" ]]; then
+                line_hits=$(grep -nE "$pat" "$f" 2>/dev/null || true)
+                if [[ -n "$line_hits" ]]; then
+                    WAVE1_HITS="${WAVE1_HITS}${f}: pattern '${pat}'\n${line_hits}\n"
+                fi
+            fi
+        done <<< "$FILES"
+    else
+        ws_excludes=()
+        for d in "${WAVE1_EXCLUDE[@]}"; do
+            ws_excludes+=("--exclude-dir=$d")
+        done
+        line_hits=$(grep -rnE "$pat" "${ws_excludes[@]}" \
+            --include='*.md' --include='*.yaml' --include='*.yml' \
+            --include='*.tf' --include='*.sh' \
+            --exclude='CLAUDE.md' --exclude='AGENTS.md' \
+            --exclude='pre-commit' \
+            . 2>/dev/null || true)
+        if [[ -n "$line_hits" ]]; then
+            WAVE1_HITS="${WAVE1_HITS}pattern '${pat}':\n${line_hits}\n"
+        fi
+    fi
+done
+
+if [[ -n "$WAVE1_HITS" ]]; then
+    echo "${RED}[pre-commit] FAIL — Wave 1 stale content remains:${NC}"
+    printf '%b\n' "$WAVE1_HITS"
+    echo "${YELLOW}Hint: this content was retired in Wave 4 — update or remove${NC}"
+    exit 2
+fi
+echo "${GREEN}  ok${NC}"
+
+# ---- 3. Credential leak scan ----
+echo "${GREEN}[pre-commit] 3/3 — credential leak scan${NC}"
+
+CRED_PATTERNS=(
+    'AKIA[0-9A-Z]{16}'                                      # AWS access key
+    'aws_secret_access_key\s*=\s*[A-Za-z0-9/+=]{40}'        # AWS secret
+    '-----BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY-----'        # Private keys
+    'ghp_[A-Za-z0-9]{36}'                                   # GitHub PAT
+    'glpat-[A-Za-z0-9_-]{20}'                               # GitLab PAT
+    'glc_[A-Za-z0-9_=]{40,}'                                # Grafana Cloud token
+    'xox[baprs]-[0-9]{10,}-[0-9]{10,}-[A-Za-z0-9]{20,}'     # Slack token
+)
+
+CRED_HITS=""
+for pat in "${CRED_PATTERNS[@]}"; do
+    if [[ "$MODE" == "staged" ]]; then
+        while IFS= read -r f; do
+            skip=0
+            for ed in "${EXCLUDE_DIRS[@]}"; do
+                [[ "$f" == "$ed/"* ]] && skip=1 && break
+            done
+            # Skip the pre-commit hook itself: it contains regex patterns that look like credentials
+            [[ "$f" == "scripts/git-hooks/pre-commit" ]] && skip=1
+            [[ $skip -eq 1 ]] && continue
+            if [[ -f "$f" ]]; then
+                line_hits=$(grep -nEo "$pat" "$f" 2>/dev/null || true)
+                if [[ -n "$line_hits" ]]; then
+                    CRED_HITS="${CRED_HITS}${f}: looks like a credential matching '${pat:0:30}...'\n"
+                fi
+            fi
+        done <<< "$FILES"
+    else
+        for d in "${EXCLUDE_DIRS[@]}"; do
+            cd_excludes+=("--exclude-dir=$d")
+        done
+        line_hits=$(grep -rnEo "$pat" "${cd_excludes[@]:-}" . 2>/dev/null || true)
+        if [[ -n "$line_hits" ]]; then
+            CRED_HITS="${CRED_HITS}pattern '${pat:0:30}...':\n${line_hits}\n"
+        fi
+    fi
+done
+
+if [[ -n "$CRED_HITS" ]]; then
+    echo "${RED}[pre-commit] FAIL — credential pattern detected:${NC}"
+    printf '%b\n' "$CRED_HITS"
+    echo "${YELLOW}Hint: never commit credentials. Use AWS Secrets Manager / ESO.${NC}"
+    exit 3
+fi
+echo "${GREEN}  ok${NC}"
+
+# ---- 4. Helm template + kubeconform (CRD-aware) ----
+# Catches schema drift in Helm-templated K8s manifests (including CRDs
+# from Velero / Prometheus Operator). Skipped automatically if helm or
+# kubeconform is not installed locally — the same check runs in CI per
+# .github/workflows/pr-validation.yml.
+echo "${GREEN}[pre-commit] 4/4 — helm template + kubeconform (CRD-aware)${NC}"
+
+if ! command -v helm >/dev/null 2>&1 || ! command -v kubeconform >/dev/null 2>&1; then
+    echo "${YELLOW}  skipped — helm and/or kubeconform not in PATH${NC}"
+    echo "${YELLOW}  (CI runs the same check on PR; install locally with 'brew install helm kubeconform' to catch schema drift before push)${NC}"
+else
+    if [[ ! -d helm/aegis-statefulset ]]; then
+        echo "${YELLOW}  skipped — helm/aegis-statefulset/ not present in cwd${NC}"
+    else
+        # CRD schemas come from the Datree catalog (same URL as
+        # CONTRIBUTING.md and the CI workflow).
+        kc_out=$(helm template helm/aegis-statefulset/ 2>/dev/null \
+            | kubeconform -strict -summary -kubernetes-version 1.29.0 \
+                -schema-location default \
+                -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+                2>&1)
+        kc_rc=$?
+        if [[ $kc_rc -ne 0 ]]; then
+            echo "${RED}[pre-commit] FAIL — kubeconform validation:${NC}"
+            echo "$kc_out" | tail -20
+            exit 4
+        fi
+        echo "${GREEN}  ok ($(echo "$kc_out" | tail -1))${NC}"
+    fi
+fi
+
+# ---- 5. Hallucination defense — claim attribution + free-floating quantitative ----
+# Two-tier check:
+#   BLOCK tier:  specific patterns that historically caused real hallucinations
+#                (RTO ≤Xh / SLA accepts Y / customer accepts ≤Z) where false
+#                positives are rare. Commit fails until fixed.
+#   WARN tier:   general attribution patterns (spec says X / Sebastian implied Y)
+#                where false positives are more common. Commit proceeds; operator
+#                eyeballs the listed lines.
+#
+# Override: add `<!-- ci:verified -->` comment on the same line if the claim
+# has been source-verified. The check skips lines containing this marker.
+echo "${GREEN}[pre-commit] 5/5 — hallucination defense (claim attribution + free-floating quantitative)${NC}"
+
+HALLU_EXCLUDE=("_context" ".claude-rules" ".git" "node_modules" ".terraform" "vendor" ".venv")
+HALLU_INCLUDE_FLAGS=(--include='*.md')
+
+# BLOCK tier — specific patterns with low false-positive rate
+BLOCK_PATTERNS=(
+    'SLA[[:space:]]+(accepts|of|guarantees)[[:space:]]+[≤<][[:space:]]*[0-9]+[[:space:]]*(h|hour|min)'
+    '(customer|client)[[:space:]]+(accepts|requires|demands)[[:space:]]+[≤<][[:space:]]*[0-9]+[[:space:]]*(h|hour|min)'
+    'spec[[:space:]]+(says|requires|sets|guarantees)[[:space:]]+[≤<][[:space:]]*[0-9]+[[:space:]]*(h|hour|min)[[:space:]]+RTO'
+    '(Sebastian|Florian)[[:space:]]+(implied|stated|guaranteed)[[:space:]]+[≤<][[:space:]]*[0-9]+'
+)
+
+block_excludes=()
+for d in "${HALLU_EXCLUDE[@]}"; do
+    block_excludes+=("--exclude-dir=$d")
+done
+
+BLOCK_HITS=""
+for pat in "${BLOCK_PATTERNS[@]}"; do
+    if [[ "$MODE" == "staged" ]]; then
+        while IFS= read -r f; do
+            skip=0
+            for ed in "${HALLU_EXCLUDE[@]}"; do
+                [[ "$f" == "$ed/"* ]] && skip=1 && break
+            done
+            [[ $skip -eq 1 ]] && continue
+            [[ ! "$f" =~ \.md$ ]] && continue
+            if [[ -f "$f" ]]; then
+                # Filter out lines with ci:verified marker
+                hits=$(grep -nE "$pat" "$f" 2>/dev/null | grep -v 'ci:verified' || true)
+                if [[ -n "$hits" ]]; then
+                    BLOCK_HITS="${BLOCK_HITS}${f}: pattern '${pat}'\n${hits}\n"
+                fi
+            fi
+        done <<< "$FILES"
+    else
+        hits=$(grep -rnE "$pat" "${block_excludes[@]}" "${HALLU_INCLUDE_FLAGS[@]}" \
+            --exclude='CLAUDE.md' --exclude='AGENTS.md' --exclude='BACKLOG.md' \
+            --exclude='pre-commit' . 2>/dev/null \
+            | grep -v 'ci:verified' || true)
+        if [[ -n "$hits" ]]; then
+            BLOCK_HITS="${BLOCK_HITS}pattern '${pat}':\n${hits}\n"
+        fi
+    fi
+done
+
+if [[ -n "$BLOCK_HITS" ]]; then
+    echo "${RED}[pre-commit] FAIL — BLOCK-tier attribution claim without source verification:${NC}"
+    printf '%b\n' "$BLOCK_HITS"
+    echo "${YELLOW}These patterns historically caused hallucinations (e.g., the RTO ≤1h fabrication).${NC}"
+    echo "${YELLOW}If the claim is source-verified, add '<!-- ci:verified -->' on the same line.${NC}"
+    echo "${YELLOW}If the claim was unverified, fix the attribution to honest framing or remove.${NC}"
+    exit 5
+fi
+echo "${GREEN}  block-tier ok${NC}"
+
+# WARN tier — general patterns with higher false-positive rate
+WARN_PATTERNS=(
+    'spec[[:space:]]+(says|gives|sets|requires|guarantees|states)'
+    '(customer|client)[[:space:]]+(accepts|requires|demands|stated)'
+    '(Sebastian|Florian)[[:space:]]+(said|implied|stated|mentioned|guaranteed)'
+    'R1[[:space:]]+(disclosed|implied|stated|guaranteed)'
+)
+
+WARN_HITS=""
+for pat in "${WARN_PATTERNS[@]}"; do
+    hits=$(grep -rnE "$pat" "${block_excludes[@]}" "${HALLU_INCLUDE_FLAGS[@]}" \
+        --exclude='CLAUDE.md' --exclude='AGENTS.md' --exclude='BACKLOG.md' \
+        --exclude='pre-commit' . 2>/dev/null \
+        | grep -v 'ci:verified' \
+        | head -10 || true)
+    if [[ -n "$hits" ]]; then
+        WARN_HITS="${WARN_HITS}--- pattern '${pat}' ---\n${hits}\n"
+    fi
+done
+
+if [[ -n "$WARN_HITS" ]]; then
+    echo "${YELLOW}[pre-commit] WARN — attribution patterns to spot-check before push:${NC}"
+    printf '%b\n' "$WARN_HITS" | head -25
+    echo "${YELLOW}(Showing first 25 lines. If verified, add '<!-- ci:verified -->' to suppress.)${NC}"
+    echo "${YELLOW}Commit proceeds — these are warnings, not failures.${NC}"
+fi
+echo "${GREEN}  warn-tier scan done${NC}"
+
+echo "${GREEN}[pre-commit] all checks passed${NC}"
+exit 0

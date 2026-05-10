@@ -1,0 +1,30 @@
+# values-dev.yaml — overrides for development environment.
+# Lower scale, faster iteration.
+# Apply alongside default values.yaml:
+#   helm install aegis ./helm/aegis-statefulset -f values-dev.yaml
+
+stateful:
+  cells:
+    count: 1
+    storage_per_pod: 50Gi  # smaller for dev cost
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+backup:
+  cadence_minutes: 60       # hourly cadence, lower frequency for dev
+  cross_region:
+    enabled: false           # dev doesn't need DR
+
+ha:
+  model: cold_dr  # default; dev still uses cold DR for parity
+
+api:
+  replicas: 1  # single replica for dev
+
+envoy:
+  replicas: 1  # single replica for dev

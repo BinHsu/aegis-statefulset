@@ -1,0 +1,56 @@
+# Sync wave -1 Application — applies the five Wave 4 namespaces with PSS
+# restricted labels before any namespaced workload syncs (the other apps
+# below this default to wave 0).
+#
+# This is the only ArgoCD-managed Application that creates Namespace
+# objects. The cluster-controller layer (ALB controller, Karpenter, ESO,
+# Kyverno, cert-manager, Velero) lives in `kube-system` / `velero` and is
+# managed by terraform `helm_release`, per ADR-04 ownership boundary —
+# those namespaces are created with `create_namespace = true` on the
+# corresponding `helm_release` resource, not here.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aegis-namespaces
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: aegis-statefulset
+
+  source:
+    repoURL: https://github.com/BinHsu/aegis-statefulset.git
+    targetRevision: main
+    path: gitops/namespaces
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default # Namespace objects are cluster-scoped; this is just the metadata namespace
+
+  syncPolicy:
+    automated:
+      prune: false # Never auto-prune namespaces — manual operator action only
+      selfHeal: true # PSS labels must remain restricted; auto-heal label drift
+    syncOptions:
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  # Drift / health visibility — surfaces in Argo UI and Slack notifications.
+  revisionHistoryLimit: 10
+
+  # Tolerated mutations — PSS controllers may add finalizer / status fields
+  # post-creation; ignore those to avoid sync-loop noise.
+  ignoreDifferences:
+    - group: ""
+      kind: Namespace
+      jsonPointers:
+        - /status
+        - /metadata/managedFields

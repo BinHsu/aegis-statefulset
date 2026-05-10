@@ -1,0 +1,119 @@
+# Stateless API tier — POC mock with nginx + proxy_pass to envoy router.
+# Pinned to master AZ (Wave 4 topology). Receives traffic from ALB Target Group
+# via TargetGroupBinding (templates/api-tgb.yaml).
+{{- if .Values.api.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aegis-statefulset.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-statefulset.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api-tier
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      {{- include "aegis-statefulset.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api-tier
+  template:
+    metadata:
+      labels:
+        {{- include "aegis-statefulset.labels" . | nindent 8 }}
+        app.kubernetes.io/component: api-tier
+    spec:
+      serviceAccountName: {{ include "aegis-statefulset.serviceAccountName" . }}
+
+      affinity:
+        # Master AZ pin (Wave 4 topology).
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: topology.kubernetes.io/zone
+                    operator: In
+                    values: ["{{ .Values.master_az }}"]
+        podAntiAffinity:
+          {{- if eq .Values.api.pod_anti_affinity.type "hard" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  {{- include "aegis-statefulset.selectorLabels" . | nindent 18 }}
+                  app.kubernetes.io/component: api-tier
+              topologyKey: kubernetes.io/hostname
+          {{- else }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "aegis-statefulset.selectorLabels" . | nindent 20 }}
+                    app.kubernetes.io/component: api-tier
+                topologyKey: kubernetes.io/hostname
+          {{- end }}
+
+      # Pod security per ADR-07
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101  # nginx user
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: api
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}@{{ .Values.api.image.digest }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          resources:
+            requests:
+              cpu: {{ .Values.api.resources.requests.cpu }}
+              memory: {{ .Values.api.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.api.resources.limits.cpu }}
+              memory: {{ .Values.api.resources.limits.memory }}
+
+          # Container security context per ADR-07
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d
+            - name: var-cache
+              mountPath: /var/cache/nginx
+            - name: var-run
+              mountPath: /var/run
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: {{ include "aegis-statefulset.fullname" . }}-api-config
+        - name: var-cache
+          emptyDir: {}
+        - name: var-run
+          emptyDir: {}
+{{- end }}

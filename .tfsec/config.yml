@@ -1,0 +1,108 @@
+# .tfsec/config.yml — intentional rule exclusions with rationale.
+#
+# Each exclusion below is documented. Real fixes for findings tfsec
+# raised are applied in-place (S3 encryption, versioning, logging, SG
+# descriptions). What's excluded here is what is intentional for the
+# current architecture and topology.
+#
+# Reviewer entry point: read alongside ADR-07 (security & runtime),
+# which establishes the threat model these decisions sit inside.
+#
+# Rule IDs follow the tfsec format: `<provider>-<service>-<rule-name>`.
+# https://aquasecurity.github.io/tfsec/v1.28.14/checks/
+
+exclude:
+  # ------------------------------------------------------------------
+  # ALB north-south ingress is the architecture
+  # ------------------------------------------------------------------
+  - aws-ec2-no-public-ingress-sgr
+  # The ALB SG ingress on 443 from 0.0.0.0/0 is the public-facing
+  # north-south entry per ADR-03. WAF (out of POC scope; documented
+  # as upgrade trigger in ADR-07) and NetworkPolicy at the cluster
+  # boundary do application-layer filtering. Removing public ingress
+  # would defeat the architecture.
+
+  - aws-ec2-no-public-egress-sgr
+  # The ALB SG egress to 0.0.0.0/0 is required so the ALB can reach
+  # backend pods + the AWS API endpoints (target group registration,
+  # certificate validation). NetworkPolicy at the cluster boundary
+  # restricts what pods accept; the SG egress here is the AWS-layer
+  # parallel.
+
+  - aws-elb-alb-not-public
+  # ALB is intentionally publicly exposed — same reason as above.
+
+  # ------------------------------------------------------------------
+  # EKS public cluster endpoint — POC reviewer access
+  # ------------------------------------------------------------------
+  - aws-eks-no-public-cluster-access
+  - aws-eks-no-public-cluster-access-to-cidr
+  # POC keeps the EKS cluster endpoint public so reviewers can run
+  # `kubectl` from their own laptop without VPN setup. Production
+  # upgrade trigger documented in ADR-07: restrict the public CIDR
+  # to office IPs / VPN, or move to a fully-private cluster with
+  # bastion access.
+
+  # ------------------------------------------------------------------
+  # Default VPC NACL — SG + NetworkPolicy do the actual filtering
+  # ------------------------------------------------------------------
+  - aws-ec2-no-public-ingress-acl
+  - aws-ec2-no-excessive-port-access
+  # Default VPC NACL allows ALL because filtering at this layer would
+  # overlap with the SG layer (where the real boundary is) plus the
+  # NetworkPolicy layer (where pod-to-pod is filtered). Layered NACL
+  # rules are operationally heavy for marginal defense-in-depth gain
+  # at this stage; documented as upgrade trigger in ADR-07.
+
+  # ------------------------------------------------------------------
+  # Velero IAM needs ec2:RunInstances on * for restore
+  # ------------------------------------------------------------------
+  - aws-iam-no-policy-wildcards
+  # Velero IAM role needs ec2:RunInstances on * to recreate stateful
+  # pods in the standby AZ during restore. The principal is scoped
+  # to a single role used only by Velero (per ADR-07 IRSA pattern);
+  # the wildcard is action-scoped, not principal-scoped. Tightening
+  # to specific resource ARNs would require predicting which EBS
+  # snapshots and which subnets exist at restore time — not feasible.
+
+  # ------------------------------------------------------------------
+  # VPC flow logs — POC cost discipline
+  # ------------------------------------------------------------------
+  - aws-ec2-require-vpc-flow-logs-for-all-vpcs
+  # POC defers VPC flow logs to keep the cost envelope clean. ALB
+  # access logs + EKS audit + CloudTrail + the eBPF runtime
+  # detection (per ADR-07) cover the network observability surface
+  # for the current threat model. Production upgrade trigger: VPC
+  # flow logs to CloudWatch Logs (or S3 with Athena) when the
+  # NetworkPolicy debug surface needs more depth.
+
+  # ------------------------------------------------------------------
+  # Lambda tracing — drain Lambda doesn't justify X-Ray cost
+  # ------------------------------------------------------------------
+  - aws-lambda-enable-tracing
+  # The drain Lambda fires only on node termination (rare event,
+  # < 100 invocations/year at expected node-rotation cadence).
+  # CloudWatch logs are sufficient for the operational debug story;
+  # X-Ray traces would be ~$0.005 per million traces — symbolic
+  # cost but no operational value at this volume.
+
+  # ------------------------------------------------------------------
+  # aws-modules — internal patterns from terraform-aws-modules
+  # ------------------------------------------------------------------
+  - aws-modules
+  # Findings inside the upstream terraform-aws-modules library; we
+  # trust the module authors and pin to a versioned release. If the
+  # findings move to the application code we wrote, they would
+  # appear under the relevant per-rule ID and not be ignored here.
+
+  # ------------------------------------------------------------------
+  # S3 customer-managed key — DR-region buckets use SSE-S3
+  # ------------------------------------------------------------------
+  - aws-s3-encryption-customer-key
+  # In-region buckets (backup_source, velero_bsl) use SSE-KMS with
+  # customer-managed keys per ADR-07. DR-region buckets (backup_dr,
+  # velero_bsl_dr) use SSE-S3 because cross-region KMS adds
+  # complexity (separate KMS key per region, principal mapping for
+  # cross-region replication, etc). Production upgrade trigger:
+  # provision a DR-region KMS key when the threat model demands
+  # customer-key control end-to-end.

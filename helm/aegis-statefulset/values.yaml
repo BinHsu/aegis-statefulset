@@ -1,0 +1,268 @@
+# values.yaml — aegis-statefulset (Wave 4 architecture revision)
+#
+# Three Organising Principles:
+#   P1: Data on EBS is the only irreplaceable asset.
+#   P2: RPO budget is a configurable trade-off, not a fixed floor.
+#   P3: Conservative on recovery, aggressive on failure detection.
+#
+# Wave 4 architectural shifts:
+#   - Single master AZ for ALL workloads (stateful + stateless tier in AZ-A).
+#     AZ-B / AZ-C: warm standby (subnet + NAT + node group desired=0).
+#   - Active-passive standby pods retired (per ADR-04 retired).
+#   - Cold DR via Velero schedule + EBS volume snapshots (per ADR-04, ADR-04).
+#   - 3-tier request flow: ALB -> nginx API -> Envoy router -> StatefulSet pod.
+
+# ====================================================================
+# Master AZ + warm-standby topology (per ADR-01 revised)
+# ====================================================================
+master_az: "eu-central-1a"
+dr_region: "eu-west-1"
+
+# ====================================================================
+# Stateful tier (per ADR-01, ADR-01, ADR-01, ADR-04)
+# ====================================================================
+stateful:
+  cells:
+    # POC default: 1 primary pod for chaos demo.
+    # Production: cells.count = N (set via terraform import per ADR-05 to
+    # match existing per-tenant pod inventory).
+    count: 1
+
+    # Storage allocated per pod (per ADR-02).
+    # POC small (20Gi); production 2Ti per ADR-02 spec default.
+    storage_per_pod: 20Gi
+
+  # POC mock image — custom Go binary doing /data/<key> filesystem ops
+  # (~30 lines, no real LevelDB). Build via scripts/build/build-stateful-mock.sh
+  # and update digest below.
+  image:
+    repository: aegis-stateful-mock
+    tag: "v0.1"
+    digest: "sha256:TODO_FILL_REAL_DIGEST_VIA_DOCKER_PULL"
+    # TODO: build via scripts/build/build-stateful-mock.sh and update digest
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+  pod_anti_affinity:
+    # production default; POC override 'soft' via values-poc.yaml
+    type: hard
+
+# ====================================================================
+# Stateless API tier (per ADR-01 routing identity, Layer 2 demo)
+# ====================================================================
+# nginx-based forwarder (POC mock). Receives traffic from ALB Target Group
+# (via TargetGroupBinding) and proxy_pass's to envoy-router service.
+api:
+  enabled: true
+  replicas: 3
+
+  image:
+    repository: nginx
+    tag: "1.27.0"
+    digest: "sha256:TODO_VERIFY_FROM_DOCKER_HUB"
+    # TODO: pull and verify from docker.io/library/nginx:1.27.0
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+  pod_anti_affinity:
+    type: hard
+
+# ====================================================================
+# Envoy router tier (per ADR-03 placement-table routing)
+# ====================================================================
+# Custom Lua filter inspects X-Tenant-ID header, queries placement table
+# (POC: in-memory pass-through; production: DynamoDB GetItem via http_call),
+# routes to the correct stateful pod via headless DNS.
+envoy:
+  enabled: true
+  replicas: 3
+
+  image:
+    repository: envoyproxy/envoy
+    tag: "v1.30.0"
+    digest: "sha256:TODO_VERIFY_FROM_DOCKER_HUB"
+    # TODO: pull and verify from docker.io/envoyproxy/envoy:v1.30.0
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  pod_anti_affinity:
+    type: hard
+
+  cache:
+    # 5 min default per ADR-03 (cost-vs-staleness curve in ADR rationale).
+    ttl_seconds: 300
+
+# ====================================================================
+# Backup pipeline — Velero schedule (per ADR-04, ADR-04, ADR-04)
+# ====================================================================
+# Replaces per-pod restic CronJobs from Wave 1. Velero takes consistent
+# EBS volume snapshots at the cadence below; cross-region replication of
+# snapshots tier handled separately (per ADR-04).
+backup:
+  # Dual-cadence pattern (per ADR-04 § dual-cadence + cost-estimate-methodology.md):
+  #   operational tier: tight cadence, source-region only — for fast roll-back
+  #   DR tier:          looser cadence, cross-region — for region-failure recovery
+  # Both schedules are independent Velero Schedule CRDs (templates/velero-schedule-*.yaml).
+  operational:
+    # POC default: 5 minutes. Source-region only (no cross-region copy).
+    # Operator-tunable; lower bound is filesystem-walk time for the application.
+    cadence_minutes: 5
+    retention_days: 7  # operational tier: short retention; matches operational use cases
+  dr:
+    # POC default: 4 hours. Cross-region replicated via Velero VSL multi-region.
+    # Cadence math: cadence + backup_duration + retry_margin ≤ spec RPO ceiling.
+    # 4h + 15min + 30min = 4h45m ≤ 6h spec ceiling (1h15m headroom).
+    # Sane upper bound is 5h; 6h has zero margin; daily breaches by 4×.
+    cadence_hours: 4
+    retention_days: 30  # DR tier: longer retention for rare region-failure scenarios
+
+  # Cross-region snapshot tier (per ADR-04).
+  cross_region:
+    enabled: true
+    target_class: "GLACIER_INSTANT_RETRIEVAL"
+    target_region: "eu-west-1"
+
+# ====================================================================
+# Disaster Recovery model (per ADR-04 retired, ADR-04, ADR-04)
+# ====================================================================
+# Wave 4 default: cold_dr — Velero restore from snapshot in target AZ,
+# warm-standby AZ node group scaled up to receive workload.
+ha:
+  model: "cold_dr"
+  # Operator-overridable target AZ for warm-standby rotation.
+  rotation_target_az_default: "eu-central-1b"
+
+# ====================================================================
+# Routing — placement table (per ADR-03)
+# ====================================================================
+routing:
+  # POC reference backend: DynamoDB. Customer can adapt to any system
+  # satisfying the 6-property contract (atomic CAS / strongly consistent
+  # reads / multi-AZ durable / low latency / CDC capable / audit logged).
+  backend: dynamodb
+
+  # Lookup miss handling (per ADR-03 § 503 semantics).
+  miss_response_code: 503
+  miss_retry_after_seconds: 30
+
+# ====================================================================
+# Tenant relocation (per ADR-01, ADR-04)
+# ====================================================================
+relocation:
+  telemetry:
+    # Source selection (Stage 3 — app architecture decides):
+    #   sidecar:        per-tenant folder du from a sidecar container (default
+    #                   for Pattern 2: per-tenant folder under /data)
+    #   app_metric:     application emits tenant_storage_bytes itself
+    #                   (Pattern 1, replaces sidecar)
+    #   pod_level_only: no per-tenant signal — manual investigation
+    source: sidecar
+    scan_interval_seconds: 300
+    sidecar_resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+  thresholds:
+    pre_emptive_pct: 75              # PR-reviewed relocation
+    emergency_pct: 90                # auto-trigger relocation
+    rate_of_change_gb_per_week: 500  # forecast-driven relocation
+
+  # Soak window cleanup gate (per ADR-01 step 7).
+  # Wave 4: standby refresh condition removed (no standby per ADR-04 retired).
+  soak_window:
+    minimum_hours: 24
+    require_target_backup: true
+    require_cross_region_replication: true
+
+# ====================================================================
+# Capacity expansion — new cell, no migration (per ADR-01)
+# ====================================================================
+capacity_expansion:
+  aggregate_threshold_pct: 70
+  warm_buffer: 0  # JIT (just-in-time)
+
+# ====================================================================
+# FinOps cost dimensions (per ADR-10)
+# ====================================================================
+finops:
+  cost_dimensions:
+    enabled: true
+    tenant_label_key: "aegis.io/tenant-id"
+    component: "stateful"
+    tier: "stateful"
+    data_class: "tenant-data"
+
+  cost_metrics:
+    scrape_enabled: true
+    annotation_prefix: "aegis.io/cost"
+
+# ====================================================================
+# Observability (per ADR-06, NEW Wave 4 Blackbox probe)
+# ====================================================================
+observability:
+  blackbox:
+    enabled: true
+    probe_targets:
+      - https://api.aegis.example.com/healthz
+    scrape_interval: 30s
+
+# ====================================================================
+# Storage (per ADR-02)
+# ====================================================================
+storage:
+  storage_class: ebs-gp3-az-aware
+  reclaim_policy: Retain  # MANDATORY per ADR-02
+
+# ====================================================================
+# Pod placement (per ADR-01, ADR-01, ADR-01)
+# ====================================================================
+placement:
+  topology_spread_constraints:
+    enabled: false  # Wave 4: master-AZ-only, spread constraints retired
+
+# ====================================================================
+# ALB integration (TargetGroupBinding to ALB Target Group)
+# ====================================================================
+alb:
+  # Set via Terraform output (module.alb.target_group_arn).
+  target_group_arn: ""
+
+# ====================================================================
+# Service Account (per ADR-07 IRSA)
+# ====================================================================
+serviceAccount:
+  create: true
+  name: aegis-statefulset
+  annotations: {}  # IRSA role ARN injected by Terraform output
+
+# ====================================================================
+# Network Policy (per ADR-07)
+# ====================================================================
+networkPolicy:
+  enabled: true
+  default_deny: true

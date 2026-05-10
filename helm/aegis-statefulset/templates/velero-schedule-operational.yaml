@@ -1,0 +1,64 @@
+# Velero Schedule A — operational tier (per ADR-04 § dual-cadence pattern).
+#
+# Tight cadence (5 min default) for fast roll-back of bad deploys / accidental
+# state corruption. Source-region only (snapshotMoveData=false; storageLocation=
+# operational which has NO cross-region replication). Pairs with Schedule B
+# below for region-failure recovery.
+#
+# Why dual-cadence:
+#   AZ failure recovery → operational snapshot (this Schedule, source region)
+#   Region failure recovery → DR snapshot (Schedule B, cross-region)
+#   Different RPO tiers + different cost shapes; see ADR-04 + cost-estimate-
+#   methodology.md for the math.
+#
+# Hook fsfreeze quiesces the application before the snapshot to ensure
+# consistency (per ADR-02 § snapshot section). For aegis-stateful-mock
+# this is a no-op `sync`; production apps should implement an admin
+# endpoint that flushes WAL + drops mutex.
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: {{ include "aegis-statefulset.fullname" . }}-schedule-operational
+  namespace: velero
+  labels:
+    {{- include "aegis-statefulset.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+    aegis.io/backup-tier: operational
+spec:
+  schedule: "*/{{ .Values.backup.operational.cadence_minutes }} * * * *"
+  template:
+    includedNamespaces:
+      - {{ .Release.Namespace }}
+    excludedNamespaces:
+      - kube-system    # terraform helm_release manages
+      - monitoring     # terraform helm_release manages
+      - kyverno
+      - external-secrets
+      - velero         # don't backup itself
+      - karpenter
+      - argocd
+    snapshotVolumes: true
+    snapshotMoveData: false  # operational tier: source region only
+    ttl: "{{ .Values.backup.operational.retention_days }}d"
+    storageLocation: operational  # non-replicated BSL bucket
+    volumeSnapshotLocations:
+      - source-region  # only, NOT dr-region
+    hooks:
+      resources:
+        - name: stateful-fsfreeze
+          includedNamespaces:
+            - {{ .Release.Namespace }}
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/component: stateful-data
+          pre:
+            - exec:
+                container: app
+                command: ["/bin/sh", "-c", "sync && echo 'pre-backup quiesce'"]
+                onError: Fail
+                timeout: 10s
+          post:
+            - exec:
+                container: app
+                command: ["/bin/sh", "-c", "echo 'post-backup'"]
+                onError: Continue

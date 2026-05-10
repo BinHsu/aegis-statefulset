@@ -1,0 +1,139 @@
+# Custom Falco rules for the stateful tier — extends the Falco Rules Library
+# default ruleset with stateful-tier-specific detections.
+#
+# Implements:
+#   - ADR-07 (Runtime security via eBPF — Falco + Tetragon)
+#   - ADR-07 (Wazuh + GuardDuty SIEM) — Falco events forward to Wazuh
+#
+# Loaded by the Falco DaemonSet via the falco-config ConfigMap mount. Default
+# rules from /etc/falco/falco_rules.yaml stay in place; this ConfigMap is
+# layered on top via rules_files in falco.yaml.
+#
+# Severity guidance:
+#   - WARNING: requires investigation, not auto-quarantine
+#   - HIGH: page on-call (wired to Wazuh -> alerting per ADR-06)
+#   - CRITICAL: confirmed indicator-of-compromise; page + initiate IR
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: falco-custom-rules
+  namespace: falco
+  labels:
+    app.kubernetes.io/name: falco
+    app.kubernetes.io/component: rules
+data:
+  custom_rules.yaml: |
+    # ==========================================================================
+    # Custom rules for aegis-statefulset stateful tier (per ADR-07)
+    # ==========================================================================
+
+    # --- Network egress -----------------------------------------------------
+    - rule: Unexpected outbound connection from stateful pod
+      desc: >
+        Stateful primary pods have a tightly-defined egress surface: ALB ingress
+        port (8080), DNS (53), HTTPS to S3 / STS / KMS endpoints (443). Any
+        outbound flow to a different destination is suspicious — possible data
+        exfiltration, command-and-control, or lateral movement attempt.
+      condition: >
+        outbound and
+        k8s.ns.name = "aegis-app" and
+        k8s.pod.label.aegis.io/role = "primary" and
+        not (
+          fd.sport in (8080, 443, 53) or
+          fd.dport in (8080, 443, 53)
+        )
+      output: >
+        Unexpected outbound from stateful pod
+        (pod=%k8s.pod.name dest=%fd.sip:%fd.sport user=%user.name proc=%proc.name)
+      priority: WARNING
+      tags: [aegis, network, stateful, mitre_t1041]
+
+    # --- Interactive shell --------------------------------------------------
+    - rule: Shell spawned in stateful container
+      desc: >
+        Interactive shells (sh, bash, dash, ksh, zsh attached to a TTY) inside
+        a stateful primary pod indicate either a compromised container or
+        unauthorized human access. The pod itself never spawns shells in
+        normal operation; ADR-04 standby refresh runs as a Job, not via exec.
+      condition: >
+        spawned_process and
+        k8s.ns.name = "aegis-app" and
+        proc.name in (sh, bash, dash, ksh, zsh) and
+        proc.tty != 0
+      output: >
+        Interactive shell in stateful pod
+        (pod=%k8s.pod.name proc=%proc.name pproc=%proc.pname user=%user.name)
+      priority: HIGH
+      tags: [aegis, shell, stateful, mitre_t1059]
+
+    # --- Sensitive file read -----------------------------------------------
+    - rule: Sensitive file read by non-system user in stateful pod
+      desc: >
+        Reading /etc/shadow, /etc/passwd, or /etc/sudoers from inside a
+        stateful container is suspicious — these files have no role in normal
+        application operation. The runAsNonRoot enforcement (ADR-07) means
+        the application user has no legitimate reason to read shadow.
+      condition: >
+        open_read and
+        k8s.ns.name = "aegis-app" and
+        fd.name in (/etc/shadow, /etc/passwd, /etc/sudoers) and
+        not container.image.repository startswith "k8s.gcr.io"
+      output: >
+        Sensitive file read in stateful pod
+        (pod=%k8s.pod.name file=%fd.name proc=%proc.name user=%user.name)
+      priority: WARNING
+      tags: [aegis, sensitive-file, stateful, mitre_t1003]
+
+    # --- Container escape attempts -----------------------------------------
+    - rule: Container escape via /proc/self/exe (CVE-2019-5736 / CVE-2024-21626)
+      desc: >
+        Writing to /proc/self/exe or /proc/<pid>/exe in a way that targets the
+        container runtime binary is the canonical runc escape pattern. Both
+        CVE-2019-5736 and CVE-2024-21626 follow this shape.
+      condition: >
+        open_write and
+        fd.name pmatch (/proc/*/exe) and
+        k8s.ns.name = "aegis-app"
+      output: >
+        Possible container escape attempt — write to /proc exe
+        (pod=%k8s.pod.name fd=%fd.name proc=%proc.name)
+      priority: CRITICAL
+      tags: [aegis, container-escape, mitre_t1611]
+
+    # --- Crypto miner indicators -------------------------------------------
+    - rule: Cryptominer process name or pattern in stateful pod
+      desc: >
+        Compromised containers are sometimes weaponised as crypto miners. The
+        common process names (xmrig, minerd, cryptonight) are easy first-pass
+        signal; deeper detection (CPU pattern, pool-protocol DNS) layered on
+        top via Falco's process-tree-mismatch heuristic.
+      condition: >
+        spawned_process and
+        k8s.ns.name = "aegis-app" and
+        (proc.name in (xmrig, minerd, cpuminer, ethminer) or
+         proc.cmdline contains "stratum+tcp://" or
+         proc.cmdline contains "--donate-level")
+      output: >
+        Cryptominer indicator in stateful pod
+        (pod=%k8s.pod.name proc=%proc.name cmdline=%proc.cmdline)
+      priority: CRITICAL
+      tags: [aegis, cryptominer, mitre_t1496]
+
+    # --- Reverse shell pattern ---------------------------------------------
+    - rule: Reverse shell pattern in stateful pod
+      desc: >
+        Classic reverse-shell command-line patterns: bash -i with redirection
+        to a network FD, nc -e, socat exec. High-confidence indicator of
+        active intrusion.
+      condition: >
+        spawned_process and
+        k8s.ns.name = "aegis-app" and
+        ((proc.name in (bash, sh, dash, ksh, zsh) and proc.cmdline contains "-i") or
+         (proc.name = "nc" and proc.cmdline contains "-e") or
+         (proc.name = "socat" and proc.cmdline contains "exec:"))
+      output: >
+        Reverse shell pattern in stateful pod
+        (pod=%k8s.pod.name proc=%proc.name cmdline=%proc.cmdline)
+      priority: CRITICAL
+      tags: [aegis, reverse-shell, mitre_t1059, mitre_t1071]

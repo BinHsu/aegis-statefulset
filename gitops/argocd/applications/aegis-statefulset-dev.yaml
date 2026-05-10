@@ -1,0 +1,43 @@
+# Dev environment Application.
+# Auto-sync + self-heal acceptable here — dev cluster is a disposable
+# integration target. Per ADR-08, prod stateful tier disables both.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aegis-statefulset-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: aegis-statefulset
+
+  source:
+    repoURL: https://github.com/BinHsu/aegis-statefulset.git
+    targetRevision: main
+    path: helm/aegis-statefulset
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-dev.yaml
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: aegis-app-dev
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  # Drift / health visibility — surfaces in Argo UI and Slack notifications.
+  revisionHistoryLimit: 10

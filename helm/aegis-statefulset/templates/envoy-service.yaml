@@ -1,0 +1,26 @@
+# Service for Envoy router tier.
+# ClusterIP — consumed by API tier nginx upstream block.
+{{- if .Values.envoy.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "aegis-statefulset.fullname" . }}-envoy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-statefulset.labels" . | nindent 4 }}
+    app.kubernetes.io/component: envoy-router
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "aegis-statefulset.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: envoy-router
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+    - name: admin
+      port: 9901
+      targetPort: 9901
+      protocol: TCP
+{{- end }}

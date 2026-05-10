@@ -1,0 +1,93 @@
+# Envoy router config (per ADR-03).
+# - HTTP listener on :8080 routes /data/* to stateful_pods cluster.
+# - Lua filter inspects X-Tenant-ID; in POC it just enforces presence,
+#   in production it queries placement table via http_call to derive the
+#   correct upstream.
+# - stateful_pods cluster uses STRICT_DNS against the headless Service,
+#   which resolves to all primary pod IPs (per-pod DNS via StatefulSet).
+{{- if .Values.envoy.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "aegis-statefulset.fullname" . }}-envoy-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-statefulset.labels" . | nindent 4 }}
+    app.kubernetes.io/component: envoy-router
+data:
+  envoy.yaml: |
+    admin:
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 9901
+
+    static_resources:
+      listeners:
+        - name: main
+          address:
+            socket_address:
+              address: 0.0.0.0
+              port_value: 8080
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: ingress_http
+                    route_config:
+                      name: local_route
+                      virtual_hosts:
+                        - name: backend
+                          domains: ["*"]
+                          routes:
+                            - match:
+                                prefix: "/data"
+                              route:
+                                cluster: stateful_pods
+                                # POC: simple cluster routing.
+                                # Production: Lua filter inspects X-Tenant-ID
+                                # and dynamically sets cluster based on
+                                # placement table lookup (per ADR-03).
+                    http_filters:
+                      - name: envoy.filters.http.lua
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+                          inline_code: |
+                            -- POC placement-table lookup (simplified).
+                            -- Production: query DynamoDB via http_call to
+                            -- placement service; cache result for
+                            -- {{ .Values.envoy.cache.ttl_seconds }}s.
+                            -- On miss: respond {{ .Values.routing.miss_response_code }}
+                            -- with Retry-After: {{ .Values.routing.miss_retry_after_seconds }}.
+                            function envoy_on_request(request_handle)
+                              local tenant_id = request_handle:headers():get("X-Tenant-ID")
+                              if tenant_id == nil or tenant_id == "" then
+                                request_handle:respond(
+                                  {[":status"] = "400"},
+                                  "Missing X-Tenant-ID"
+                                )
+                                return
+                              end
+                              -- POC: pass through. Production: lookup +
+                              -- request_handle:streamInfo():dynamicMetadata()
+                              -- :set("envoy.lb", "hash_key", tenant_id)
+                            end
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+      clusters:
+        - name: stateful_pods
+          type: STRICT_DNS
+          lb_policy: ROUND_ROBIN
+          load_assignment:
+            cluster_name: stateful_pods
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          address: {{ include "aegis-statefulset.fullname" . }}-headless
+                          port_value: 8080
+{{- end }}

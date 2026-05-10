@@ -1,0 +1,35 @@
+# nginx config for stateless API tier.
+# Forwards /data/* requests to the Envoy router (placement-table lookup),
+# preserves X-Tenant-ID header for downstream Lua filter.
+{{- if .Values.api.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "aegis-statefulset.fullname" . }}-api-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-statefulset.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api-tier
+data:
+  default.conf: |
+    upstream envoy {
+      server {{ include "aegis-statefulset.fullname" . }}-envoy:8080;
+    }
+
+    server {
+      listen 8080;
+
+      # POC: forward /data/* to Envoy router (placement table lookup).
+      location /data {
+        proxy_pass http://envoy/data;
+        proxy_set_header X-Tenant-ID $http_x_tenant_id;
+        proxy_set_header X-Forwarded-For $remote_addr;
+      }
+
+      # Health check (no forwarding) — used by ALB Target Group + K8s probes.
+      location /healthz {
+        return 200 'ok';
+        add_header Content-Type text/plain;
+      }
+    }
+{{- end }}

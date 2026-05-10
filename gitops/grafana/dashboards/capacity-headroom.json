@@ -1,0 +1,406 @@
+{
+  "__comment": "Capacity headroom dashboard per ADR-045 + ADR-046. Skeleton — Prometheus / DynamoDB query bodies are placeholders pending placement-service metric instrumentation. Datasource UIDs are environment-specific; keep ${DS_*} variables and resolve at provisioning time via the Grafana provider's datasource binding. TODO finalize query markers indicate where the actual PromQL / Athena SQL goes once metrics are live.",
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": "${DS_PROMETHEUS}",
+        "enable": true,
+        "iconColor": "orange",
+        "name": "Relocation events",
+        "expr": "changes(aegis_placement_state_transitions_total[5m]) > 0"
+      },
+      {
+        "datasource": "${DS_PROMETHEUS}",
+        "enable": true,
+        "iconColor": "yellow",
+        "name": "Capacity expansions",
+        "expr": "changes(aegis_cells_per_az[1d]) > 0"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [
+    {
+      "icon": "external link",
+      "tags": ["operations", "adr-045", "adr-046"],
+      "title": "Tenant relocation runbook",
+      "type": "link",
+      "url": "/docs/operations/tenant-relocation.md"
+    },
+    {
+      "icon": "external link",
+      "tags": ["operations", "adr-045"],
+      "title": "Capacity expansion runbook",
+      "type": "link",
+      "url": "/docs/operations/capacity-expansion.md"
+    },
+    {
+      "icon": "external link",
+      "tags": ["operations", "tuning"],
+      "title": "Threshold tuning guide",
+      "type": "link",
+      "url": "/docs/operations/relocation-tuning.md"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Pod EBS used vs allocated",
+      "description": "Per-pod EBS utilisation heatmap. Triggers: 75% PR, 90% emergency. Source: kubelet + sidecar.",
+      "type": "heatmap",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * (kubelet_volume_stats_used_bytes{namespace=\"aegis-app\",persistentvolumeclaim=~\"data-aegis-statefulset-primary-.*\"} / kubelet_volume_stats_capacity_bytes{namespace=\"aegis-app\",persistentvolumeclaim=~\"data-aegis-statefulset-primary-.*\"})",
+          "legendFormat": "{{persistentvolumeclaim}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 75},
+              {"color": "red", "value": 90}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Tenant size — top 20",
+      "description": "Tenants ordered by size. Watch for tenants >= 30% of one pod (relocation candidates per ADR-046 §8).",
+      "type": "table",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(20, aegis_tenant_size_bytes{namespace=\"aegis-app\"})",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "Value"},
+            "properties": [
+              {"id": "displayName", "value": "Size"}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "title": "Tenant growth rate (7d) — top 20",
+      "description": "predict_linear over 7d. Tenants growing >= 500GB/week trigger PR-tier alert per ADR-046 §1.",
+      "type": "table",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(20, predict_linear(aegis_tenant_size_bytes{namespace=\"aegis-app\"}[7d], 7 * 86400) - aegis_tenant_size_bytes{namespace=\"aegis-app\"})",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 268435456000},
+              {"color": "red", "value": 536870912000}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "Pod headroom forecast — when each pod hits 80%",
+      "description": "predict_linear forecast. Pods forecast to hit 80% within 14 days = capacity expansion candidate per ADR-045.",
+      "type": "table",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 18},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(0.8 * kubelet_volume_stats_capacity_bytes{namespace=\"aegis-app\",persistentvolumeclaim=~\"data-aegis-statefulset-primary-.*\"} - kubelet_volume_stats_used_bytes{namespace=\"aegis-app\",persistentvolumeclaim=~\"data-aegis-statefulset-primary-.*\"}) / clamp_min(deriv(kubelet_volume_stats_used_bytes{namespace=\"aegis-app\",persistentvolumeclaim=~\"data-aegis-statefulset-primary-.*\"}[7d]), 1)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{persistentvolumeclaim}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 1209600},
+              {"color": "green", "value": 2592000}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Active relocations",
+      "description": "Tenants currently in SOAK_PENDING_* state. Lists tenant_id, source pod, target pod, flip_at, cleanup_eligible_at. Source: placement table via Athena (DynamoDB Streams export).",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 18},
+      "targets": [
+        {
+          "refId": "A",
+          "rawSQL": "-- TODO finalize query against placement-table export\nSELECT tenant_id, pending_source_pod AS source_pod, primary_pod AS target_pod, from_unixtime(flip_at) AS flip_at, from_unixtime(cleanup_eligible_at) AS cleanup_eligible_at, state FROM placement_table WHERE state LIKE 'SOAK_PENDING_%' ORDER BY flip_at DESC",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "title": "Relocation history — last 30 days",
+      "description": "Completed relocations. Useful for capacity-planning postmortem and ops volume tracking.",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 28},
+      "targets": [
+        {
+          "refId": "A",
+          "rawSQL": "-- TODO finalize query against placement-table change-history export\nSELECT tenant_id, source_pod, target_pod, from_unixtime(flip_at) AS flip_at, from_unixtime(cleanup_at) AS cleanup_at, (cleanup_at - flip_at) / 3600.0 AS soak_hours, trigger_tier FROM placement_change_log WHERE event_type = 'CLEANUP_DONE' AND flip_at >= to_unixtime(current_date - interval '30' day) ORDER BY flip_at DESC",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "title": "Envoy cache hit rate",
+      "description": "Routing cache hit %. Expect a brief dip during sync-invalidate (relocation Step 6.3). A sharp drop across all tenants signals a bulk flush fired (Step 6.5 fallback or operator-triggered).",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 38},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum(rate(envoy_cache_hits_total[1m])) by (pod) / clamp_min(sum(rate(envoy_cache_lookups_total[1m])) by (pod), 1)",
+          "legendFormat": "{{pod}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 90},
+              {"color": "green", "value": 98}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "title": "Cell capacity",
+      "description": "Current cells.per_az x AZ count, with aggregate occupancy. Capacity expansion bumps cells.per_az; per ADR-045 existing tenants don't migrate.",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 38},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "aegis_cells_per_az * aegis_cells_az_count",
+          "legendFormat": "Total pods"
+        },
+        {
+          "refId": "B",
+          "expr": "100 * sum(kubelet_volume_stats_used_bytes{namespace=\"aegis-app\",persistentvolumeclaim=~\"data-aegis-statefulset-primary-.*\"}) / sum(kubelet_volume_stats_capacity_bytes{namespace=\"aegis-app\",persistentvolumeclaim=~\"data-aegis-statefulset-primary-.*\"})",
+          "legendFormat": "Aggregate occupancy"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 70},
+              {"color": "red", "value": 80}
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byFrameRefID", "options": "B"},
+            "properties": [
+              {"id": "unit", "value": "percent"}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "title": "Cleanup gate latency",
+      "description": "Time spent in SOAK_PENDING_* states broken down by gate condition. Long stalls on (a)/(b)/(c) signal a broken backup, replication, or standby-refresh pipeline. The 24h floor (d) is by design.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 38},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum(rate(aegis_relocation_soak_duration_seconds_bucket[1h])) by (le, gate))",
+          "legendFormat": "p95 {{gate}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "title": "Trigger-tier alert volume (last 24h)",
+      "description": "Count of PR-tier vs emergency-tier vs growth-rate alerts. High emergency volume = thresholds too lazy or growth shape unexpected; see relocation-tuning.md.",
+      "type": "bargauge",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 46},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (tier) (increase(aegis_placement_alert_total[24h]))",
+          "legendFormat": "{{tier}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 5},
+              {"color": "red", "value": 10}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["operations", "capacity", "relocation", "adr-045", "adr-046"],
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {"text": "Prometheus", "value": "Prometheus"}
+      },
+      {
+        "name": "DS_ATHENA",
+        "type": "datasource",
+        "query": "grafana-athena-datasource",
+        "current": {"text": "Athena", "value": "Athena"}
+      },
+      {
+        "name": "namespace",
+        "type": "constant",
+        "current": {"text": "aegis-app", "value": "aegis-app"},
+        "hide": 2
+      }
+    ]
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["10s", "30s", "1m", "5m", "15m", "30m", "1h", "2h", "1d"]
+  },
+  "timezone": "browser",
+  "title": "Capacity Headroom & Relocation",
+  "uid": "aegis-capacity-headroom",
+  "version": 1,
+  "weekStart": ""
+}

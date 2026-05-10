@@ -1,0 +1,104 @@
+# Disallow privileged containers — defense in depth alongside Pod Security
+# Standards "restricted" in cluster-policies/restricted-pss.yaml.
+#
+# Implements:
+#   - ADR-07 (Pod Security Standards + Kyverno) — supply-chain layer hardening
+#   - CIS Kubernetes Benchmark v1.8 — 5.2.1, 5.2.5
+#
+# Why duplicate PSS? PSS namespace labels are operator-controllable: anyone
+# with namespace edit rights can flip enforce: privileged. A ClusterPolicy is
+# cluster-scoped — the supply-chain compromise that drops a privileged pod
+# manifest into a namespace doesn't get to relabel the namespace silently.
+# Two layers of "no privileged" with different blast radius for tampering.
+#
+# Exception: ADR-07 Wazuh DaemonSet, ADR-07 Falco / Tetragon DaemonSets
+# need privileged mode. Excluded by namespace.
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privileged-containers
+  annotations:
+    policies.kyverno.io/title: Disallow Privileged Containers
+    policies.kyverno.io/category: Pod Security Standards
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: |
+      Privileged containers can effectively act as the host. Per ADR-07,
+      application namespaces are PSS-restricted; this ClusterPolicy adds a
+      second, cluster-wide layer that does not depend on namespace labelling.
+      Security tooling DaemonSets (Wazuh / Falco / Tetragon) are explicitly
+      excluded — they need privileged mode and are documented in the
+      respective ADRs.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: privileged-containers
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - falco
+                - tetragon
+                - wazuh
+      validate:
+        message: "Privileged containers are not allowed in application namespaces (per ADR-07)."
+        pattern:
+          spec:
+            =(initContainers):
+              - =(securityContext):
+                  =(privileged): "false"
+            containers:
+              - =(securityContext):
+                  =(privileged): "false"
+
+    - name: privileged-host-paths
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - falco
+                - tetragon
+                - wazuh
+      validate:
+        message: "Mounting hostPath into application pods is not allowed (per ADR-07)."
+        pattern:
+          spec:
+            =(volumes):
+              - X(hostPath): "null"
+
+    - name: privileged-capabilities
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - falco
+                - tetragon
+                - wazuh
+      validate:
+        message: "Adding Linux capabilities (SYS_ADMIN, NET_ADMIN, etc.) is not allowed in application namespaces."
+        pattern:
+          spec:
+            containers:
+              - =(securityContext):
+                  =(capabilities):
+                    X(add): "null"

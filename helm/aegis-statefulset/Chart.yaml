@@ -1,0 +1,28 @@
+apiVersion: v2
+name: aegis-statefulset
+description: Three-tier stateful Kubernetes workload — master-AZ topology + warm-standby AZ rotation + Velero cold DR + per-tenant placement-table routing
+type: application
+version: 0.2.0
+appVersion: "1.0.0"
+keywords:
+  - statefulset
+  - master-az
+  - warm-standby
+  - cold-dr
+  - velero
+  - placement-table
+  - envoy
+  - migration
+  - strangler-fig
+maintainers:
+  - name: Pin-Feng (Bin) Hsu
+    url: https://binhsu.org
+
+# Dependencies pinned per ADR-09 (use specific versions; production should
+# pin to OCI digest via Renovate-managed updates)
+dependencies: []
+  # Future: kube-prometheus-stack as subchart if not deployed via ArgoCD separately
+  # - name: kube-prometheus-stack
+  #   version: 56.6.2
+  #   repository: https://prometheus-community.github.io/helm-charts
+  #   condition: observability.enabled

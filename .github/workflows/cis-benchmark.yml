@@ -1,0 +1,100 @@
+# CIS Kubernetes Benchmark — runs kube-bench against an ephemeral kind
+# cluster on a weekly schedule, producing a parseable report. FAIL findings
+# open a GitHub issue tagged 'cis-benchmark' for triage.
+#
+# Implements:
+#   - ADR-031 (Pod Security Standards + Kyverno) — CIS findings drive policy refinement
+#   - ADR-039 (SHA pinning)
+#
+# Note: kube-bench against a kind cluster covers worker-node and policy
+# checks (CIS sections 4.x and 5.x). Master-node checks (1.x, 2.x, 3.x) are
+# AWS-EKS-managed control plane responsibility — AWS publishes attestation
+# for those via the EKS service. Stage 3 conversation: integrate AWS EKS
+# CIS attestation into the same compliance dashboard.
+#
+# Trigger: weekly Mondays 03:00 UTC, or manual dispatch.
+
+name: CIS Kubernetes Benchmark
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'  # Mondays 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write   # auto-open issue on FAIL findings
+
+jobs:
+  kube-bench:
+    name: kube-bench against ephemeral cluster
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - name: Setup kind cluster
+        uses: helm/kind-action@99576bfa6ddf9a8e612d83b513da5a75875caced  # v1.9.0
+        with:
+          version: v0.21.0
+          cluster_name: aegis-cis
+
+      - name: Run kube-bench
+        run: |
+          set -euo pipefail
+          # job-eks.yaml profile is the right one even on kind — it skips master
+          # checks (which would only apply to a self-managed control plane) and
+          # focuses on worker-node and policy controls that match our EKS posture.
+          kubectl apply -f https://raw.githubusercontent.com/aquasecurity/kube-bench/v0.7.0/job-eks.yaml
+          kubectl wait --for=condition=complete --timeout=300s job/kube-bench
+          kubectl logs -l app=kube-bench --tail=-1 > kube-bench-report.txt
+          echo "--- summary ---"
+          tail -n 20 kube-bench-report.txt
+
+      - name: Parse CIS findings
+        id: parse
+        run: |
+          set -euo pipefail
+          fail_count=$(grep -c '^\[FAIL\]' kube-bench-report.txt || echo 0)
+          warn_count=$(grep -c '^\[WARN\]' kube-bench-report.txt || echo 0)
+          pass_count=$(grep -c '^\[PASS\]' kube-bench-report.txt || echo 0)
+          echo "fail_count=$fail_count" >> "$GITHUB_OUTPUT"
+          echo "warn_count=$warn_count" >> "$GITHUB_OUTPUT"
+          echo "pass_count=$pass_count" >> "$GITHUB_OUTPUT"
+          echo "CIS scan: PASS=$pass_count WARN=$warn_count FAIL=$fail_count"
+
+      - name: Upload kube-bench report
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3  # v4.3.1
+        with:
+          name: kube-bench-cis-report
+          path: kube-bench-report.txt
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Open issue if FAIL findings present
+        if: steps.parse.outputs.fail_count != '0'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+        with:
+          script: |
+            const failCount = '${{ steps.parse.outputs.fail_count }}';
+            const warnCount = '${{ steps.parse.outputs.warn_count }}';
+            const passCount = '${{ steps.parse.outputs.pass_count }}';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `CIS Benchmark — ${failCount} FAIL, ${warnCount} WARN`,
+              body: [
+                `Weekly kube-bench scan completed with findings:`,
+                ``,
+                `- FAIL: ${failCount}`,
+                `- WARN: ${warnCount}`,
+                `- PASS: ${passCount}`,
+                ``,
+                `Full report: ${runUrl}`,
+                ``,
+                `Triage per ADR-031 (Pod Security + Kyverno) — FAIL items either become Kyverno policies or get explicit risk acceptance with rationale.`,
+              ].join('\n'),
+              labels: ['security', 'cis-benchmark']
+            });

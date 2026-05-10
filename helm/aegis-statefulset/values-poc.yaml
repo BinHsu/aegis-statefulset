@@ -1,0 +1,46 @@
+# values-poc.yaml — overrides for chaos demo (1-node POC)
+#
+# POC posture:
+#   - 1-node tolerable: soft anti-affinity allows pods to co-locate
+#   - reduced resources for cheap chaos test
+#   - stateful.cells.count = 1 (single primary pod for chaos demo)
+#
+# Apply alongside default values.yaml:
+#   helm install aegis ./helm/aegis-statefulset -f values-poc.yaml
+
+# Allow pods to co-locate on a single node for cheap chaos test.
+# Production should use 'hard' (default in values.yaml).
+stateful:
+  cells:
+    count: 1
+  pod_anti_affinity:
+    type: soft
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+api:
+  pod_anti_affinity:
+    type: soft
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+envoy:
+  pod_anti_affinity:
+    type: soft
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

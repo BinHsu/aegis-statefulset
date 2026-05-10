@@ -1,0 +1,90 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-pod-resource-limits
+  annotations:
+    policies.kyverno.io/title: Require Pod Resource Requests and Limits
+    policies.kyverno.io/category: Best Practices, FinOps
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: |
+      Every container must declare CPU + memory requests and limits.
+      Two reasons, both architectural:
+
+      1. Cluster stability. A pod without a memory limit can OOM-kill the
+         node; a pod without CPU requests can starve neighbours. Karpenter
+         and the scheduler need both numbers to make correct placement
+         decisions, and on a stateful platform (per ADR-01) a misplaced
+         pod can mean a customer-facing tail-latency spike.
+
+      2. Cost predictability (ADR-10 FinOps tagging). OpenCost computes
+         per-namespace and per-tenant cost from `requests`. A pod with no
+         requests reports zero cost, which silently breaks tenant cost
+         attribution and makes capacity planning fiction.
+
+      Both reasons converge: declare what you intend to consume, the
+      cluster honours it, the FinOps math holds.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: require-resource-requests
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "CPU and memory requests are required on every container (cluster stability + ADR-10 cost attribution)."
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  requests:
+                    memory: "?*"
+                    cpu: "?*"
+    - name: require-resource-limits
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "CPU and memory limits are required on every container (prevents node-level OOM cascades)."
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  limits:
+                    memory: "?*"
+                    cpu: "?*"
+    - name: require-resource-requests-init
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "Init containers also require resource requests."
+        pattern:
+          spec:
+            =(initContainers):
+              - resources:
+                  requests:
+                    memory: "?*"
+                    cpu: "?*"
+    - name: require-resource-limits-init
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "Init containers also require resource limits."
+        pattern:
+          spec:
+            =(initContainers):
+              - resources:
+                  limits:
+                    memory: "?*"
+                    cpu: "?*"

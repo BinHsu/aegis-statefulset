@@ -1,0 +1,71 @@
+# Observability stack — Prometheus + Alertmanager + Grafana.
+# Stateless tier (Prometheus PVCs are disposable telemetry, not customer data),
+# so auto-sync + self-heal is acceptable.
+#
+# Chart pinned to a specific version per ADR-09.
+# TODO: replace `targetRevision` with chart digest (immutable SHA-256) once
+# Renovate is wired up for chart-level pinning.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: observability-stack
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: aegis-statefulset
+
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 56.6.2
+    helm:
+      values: |
+        prometheus:
+          prometheusSpec:
+            replicas: 3
+            retention: 30d
+            podAntiAffinity: hard
+            # Multi-vantage detection per ADR-06 — each Prometheus replica
+            # lands in a distinct AZ, so a single AZ outage cannot blind alerting.
+            topologySpreadConstraints:
+              - maxSkew: 1
+                topologyKey: topology.kubernetes.io/zone
+                whenUnsatisfiable: DoNotSchedule
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: prometheus
+        alertmanager:
+          alertmanagerSpec:
+            replicas: 3
+            topologySpreadConstraints:
+              - maxSkew: 1
+                topologyKey: topology.kubernetes.io/zone
+                whenUnsatisfiable: DoNotSchedule
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: alertmanager
+        grafana:
+          # Dashboards provisioned via Terraform Grafana provider per ADR-06.
+          # Grafana itself runs here as the renderer; sources of truth are git.
+          replicas: 2
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 10

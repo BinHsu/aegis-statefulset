@@ -1,0 +1,97 @@
+# Tetragon TracingPolicies — kernel-level enforcement for stateful tier.
+#
+# Implements:
+#   - ADR-07 (Runtime security via eBPF — Falco for breadth, Tetragon for enforcement)
+#
+# Tetragon TracingPolicy attaches eBPF programs to kernel hooks (kprobes,
+# tracepoints) and can take in-kernel action (Sigkill, override) on selector
+# matches. Used here for a small, conservative set of high-confidence
+# enforcement rules — narrow scope, low false-positive risk.
+#
+# Why narrow scope: Tetragon's kernel-level Sigkill is a powerful action.
+# A noisy policy can take down legitimate workloads. Discipline: every
+# TracingPolicy starts with no action (observation only), graduates to
+# Sigkill after a 14-day green window in the SIEM (ADR-07).
+#
+# Loading: applied to the `aegis-app` namespace cluster-wide via Argo CD
+# (ADR-08). Tetragon agent watches CRD changes and reloads BPF programs
+# without restart.
+
+---
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: aegis-stateful-syscall-monitoring
+  annotations:
+    aegis.io/maturity: enforce  # observation -> enforce after 14-day green window
+spec:
+  # Selector binds the policy to stateful primary pods only.
+  podSelector:
+    matchLabels:
+      aegis.io/role: primary
+
+  kprobes:
+    # ---------- setuid: privilege escalation ----------
+    - call: sys_setuid
+      syscall: true
+      args:
+        - index: 0
+          type: int  # uid argument
+      selectors:
+        # Allow uid 0->non-zero transitions during pod init (rare but legitimate
+        # for containers that drop privileges). Block other invocations.
+        - matchPIDs:
+            - operator: NotIn
+              followForks: true
+              isNamespacePID: true
+              values:
+                - 0  # init
+          matchActions:
+            - action: Sigkill  # kernel-level enforcement
+
+    # ---------- ptrace: debugger / process injection ----------
+    - call: sys_ptrace
+      syscall: true
+      selectors:
+        # ptrace has no legitimate use in our application containers — debugging
+        # happens in dev environments via dedicated tooling, not via in-pod
+        # ptrace. Hard kill any invocation.
+        - matchActions:
+            - action: Sigkill
+
+    # ---------- mount: container escape primitive ----------
+    - call: sys_mount
+      syscall: true
+      selectors:
+        # Application containers do not mount filesystems. PSS-restricted
+        # already blocks this at admission; Tetragon is the runtime mirror.
+        - matchActions:
+            - action: Sigkill
+
+---
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: aegis-stateful-network-monitoring
+  annotations:
+    aegis.io/maturity: observe  # network policies start in observation mode
+spec:
+  podSelector:
+    matchLabels:
+      aegis.io/role: primary
+
+  kprobes:
+    # ---------- TCP connect: data exfiltration vector ----------
+    - call: tcp_connect
+      syscall: false
+      args:
+        - index: 0
+          type: sock
+      selectors:
+        # Observation only at this stage — log every TCP connect from stateful
+        # pods. The Falco rule "Unexpected outbound connection" handles the
+        # alerting; Tetragon supplies the kernel-level event for high-fidelity
+        # forensics. Promote to Sigkill once egress allowlist is stable.
+        - matchActions:
+            - action: Post
+              rateLimit: "1m"  # one event per minute per pod max

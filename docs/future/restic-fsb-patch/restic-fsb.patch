@@ -1,0 +1,87 @@
+From: aegis-statefulset architecture team
+Subject: [PATCH] Switch DR-tier Schedule B from CSI to Velero FSB (Kopia)
+Date: 2026-05-10 (revised for dual-cadence architecture)
+References: docs/future/restic-fsb-patch.md, docs/operations/why-velero-not-restic.md
+
+This patch flips the **DR-tier Schedule B** from CSI Snapshot path to
+Velero's File System Backup (FSB) path with Kopia. Schedule A (operational,
+5-min cadence, source-region only) **stays on CSI** — fast restore
+remains the operational tier's primary value.
+
+Hybrid pattern outcome:
+  - Schedule A: CSI EBS Snapshot, 5-min cadence, source region only
+                → Fast operational roll-back; ~25 min RTO via Velero restore
+  - Schedule B: FSB Kopia chunks, 4h cadence, source + DR (S3 replicated)
+                → Cross-cloud portable, granular file-level restore,
+                   archival-tier-cost-friendly
+
+Apply only after Stage 3 conversation establishes the customer's profile
+rewards cross-cloud DR portability + granular restore at the DR tier
+(see docs/operations/why-velero-not-restic.md trade-off table).
+
+Files modified:
+  1. infrastructure/terraform/cluster-controllers.tf  (+10 lines: deployNodeAgent + uploaderType)
+  2. helm/aegis-statefulset/templates/velero-schedule-dr.yaml  (~5 lines: switch DR Schedule to FSB)
+
+Files NOT modified:
+  - velero-schedule-operational.yaml (stays on CSI, source-region only)
+  - velero-storage.tf (existing replicated BSL serves FSB chunks naturally)
+  - values.yaml (dual-cadence schema unchanged; FSB respects same cadence settings)
+
+Apply: git apply docs/future/restic-fsb-patch/restic-fsb.patch
+If `git apply` rejects on context drift: `git apply --recount`
+Verify: terraform validate + helm lint after apply
+
+---
+
+diff --git a/infrastructure/terraform/cluster-controllers.tf b/infrastructure/terraform/cluster-controllers.tf
+--- a/infrastructure/terraform/cluster-controllers.tf
++++ b/infrastructure/terraform/cluster-controllers.tf
+@@ -123,6 +123,16 @@
+   set {
+     name  = "serviceAccount.server.annotations.eks\\.amazonaws\\.com/role-arn"
+     value = aws_iam_role.velero.arn
+   }
+
++  # FSB path enabled for DR-tier Schedule B (Kopia uploader, default since
++  # Velero 1.10). Schedule A (operational) continues on CSI. See
++  # docs/future/restic-fsb-patch.md for trade-off rationale.
++  set {
++    name  = "deployNodeAgent"
++    value = "true"
++  }
++
++  set {
++    name  = "configuration.uploaderType"
++    value = "kopia"
++  }
++
+   set {
+     name  = "configuration.backupStorageLocation[0].name"
+     value = "default"
+   }
+diff --git a/helm/aegis-statefulset/templates/velero-schedule-dr.yaml b/helm/aegis-statefulset/templates/velero-schedule-dr.yaml
+--- a/helm/aegis-statefulset/templates/velero-schedule-dr.yaml
++++ b/helm/aegis-statefulset/templates/velero-schedule-dr.yaml
+@@ -29,12 +29,17 @@
+       - velero
+       - karpenter
+       - argocd
+-    snapshotVolumes: true
+-    snapshotMoveData: true  # DR tier: replicate across regions
++    # FSB path for DR tier — Kopia chunks land in BSL (replicated to
++    # DR region via S3 cross-region replication, NOT via EBS CopySnapshot).
++    # Schedule A (operational) stays on CSI for fast restore.
++    defaultVolumesToFsBackup: true
++    snapshotVolumes: false
++    snapshotMoveData: false  # FSB path: cross-region via S3 replication, not CopySnapshot
+     ttl: "{{ .Values.backup.dr.retention_days }}d"
+     storageLocation: default  # replicated BSL bucket (velero_bsl)
+-    volumeSnapshotLocations:
+-      - source-region
+-      - dr-region
++    # volumeSnapshotLocations not used in FSB path; cross-region copy
++    # handled by aws_s3_bucket_replication_configuration on velero_bsl.
+     hooks:
+       resources:
+         - name: stateful-fsfreeze

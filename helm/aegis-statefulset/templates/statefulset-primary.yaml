@@ -1,0 +1,241 @@
+# StatefulSet — primary pods (Wave 4 architecture).
+#
+# Wave 4 changes vs. Wave 1:
+#   - Single master AZ (nodeAffinity pinned to .Values.master_az)
+#   - .Values.stateful.cells.count drives replica count (POC=1 per ADR-05)
+#   - Pod anti-affinity respects .Values.stateful.pod_anti_affinity.type
+#     (hard for production, soft for chaos POC)
+#   - /data mount used by aegis-stateful-mock for filesystem ops
+#     (POC: ~30 lines Go binary; NOT real LevelDB)
+#   - Headless Service (templates/headless-service.yaml) gives per-pod DNS
+#     used by Envoy router upstream cluster.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "aegis-statefulset.fullname" . }}-primary
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-statefulset.labels" . | nindent 4 }}
+    app.kubernetes.io/component: stateful-data
+    aegis.io/role: primary
+spec:
+  serviceName: {{ include "aegis-statefulset.fullname" . }}-headless
+  replicas: {{ .Values.stateful.cells.count }}
+
+  podManagementPolicy: OrderedReady  # for stateful workloads
+
+  selector:
+    matchLabels:
+      {{- include "aegis-statefulset.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: stateful-data
+      aegis.io/role: primary
+
+  template:
+    metadata:
+      labels:
+        {{- include "aegis-statefulset.labels" . | nindent 8 }}
+        app.kubernetes.io/component: stateful-data
+        aegis.io/role: primary
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      serviceAccountName: {{ include "aegis-statefulset.serviceAccountName" . }}
+
+      affinity:
+        # Master AZ pin (Wave 4 topology — all stateful workloads in master AZ).
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: topology.kubernetes.io/zone
+                    operator: In
+                    values: ["{{ .Values.master_az }}"]
+                  - key: aegis.io/pool
+                    operator: In
+                    values: ["stateful"]
+        # Spread primary pods across nodes (within master AZ).
+        # 'hard' = required (production); 'soft' = preferred (POC chaos demo).
+        podAntiAffinity:
+          {{- if eq .Values.stateful.pod_anti_affinity.type "hard" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  {{- include "aegis-statefulset.selectorLabels" . | nindent 18 }}
+                  aegis.io/role: primary
+              topologyKey: kubernetes.io/hostname
+          {{- else }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "aegis-statefulset.selectorLabels" . | nindent 20 }}
+                    aegis.io/role: primary
+                topologyKey: kubernetes.io/hostname
+          {{- end }}
+
+      tolerations:
+        - key: aegis.io/stateful
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+
+      # Graceful drain budget (per ADR-02 § Graceful shutdown).
+      # Default 60s — long enough for the app's SIGTERM handler to:
+      #   1. Stop accepting new connections (http.Server.Shutdown)
+      #   2. Drain in-flight requests
+      #   3. Flush + Close LevelDB (MemTable → SSTable, release file lock)
+      #   4. fsync the data directory
+      # Without this, K8s SIGKILLs at the default 30s, which is the
+      # canonical cause of LevelDB corruption under K8s rolling-update.
+      terminationGracePeriodSeconds: {{ .Values.stateful.termination_grace_seconds | default 60 }}
+
+      # Pod security per ADR-07
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: app
+          # POC mock image — custom Go binary doing /data/<key> filesystem ops.
+          # Build via scripts/build/build-stateful-mock.sh and update digest in
+          # values.yaml.
+          image: "{{ .Values.stateful.image.repository }}:{{ .Values.stateful.image.tag }}@{{ .Values.stateful.image.digest }}"
+          imagePullPolicy: {{ .Values.stateful.image.pullPolicy }}
+
+          # Pod security context per ADR-07
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          ports:
+            - name: app
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+
+          # Graceful shutdown sequence (per ADR-02 § Graceful shutdown).
+          # K8s SIGTERM → preStop runs first → then SIGTERM hits the
+          # process → the app's signal handler does http.Server.Shutdown
+          # + LevelDB Close + fsync. The preStop sleep gives the
+          # service-level load-balancer time to remove this pod from the
+          # backend pool before the process actually exits — avoids the
+          # 5-10 second window where ALB still sends traffic to a pod
+          # that has stopped accepting connections.
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - "sleep 10"
+
+          resources:
+            requests:
+              cpu: {{ .Values.stateful.resources.requests.cpu }}
+              memory: {{ .Values.stateful.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.stateful.resources.limits.cpu }}
+              memory: {{ .Values.stateful.resources.limits.memory }}
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+
+        # Per-tenant size telemetry (per ADR-01).
+        # Emits tenant_storage_bytes{tenant_id, pod_ordinal} on :9091/metrics.
+        # ServiceMonitor in templates/servicemonitor-telemetry.yaml scrapes this.
+        # Skipped when source != "sidecar" (e.g. app_metric or pod_level_only).
+        {{- if eq .Values.relocation.telemetry.source "sidecar" }}
+        - name: telemetry-sidecar
+          image: alpine:3.19@sha256:51b67269f354137895d43f3b3d810bfacd3945438e94dc5ac55fdac340352f48
+          # ^ TODO: verify SHA matches alpine 3.19 latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              # Per ADR-01 telemetry contract:
+              #   tenant_storage_bytes{tenant_id, pod_ordinal}
+              # Assumes per-tenant folder layout under /data/<tenant_id>/.
+              while true; do
+                : > /tmp/metrics.tmp
+                for d in /data/*/; do
+                  [ -d "$d" ] || continue
+                  tenant_id=$(basename "$d")
+                  size_bytes=$(du -sb "$d" 2>/dev/null | cut -f1 || echo 0)
+                  echo "tenant_storage_bytes{tenant_id=\"$tenant_id\",pod_ordinal=\"$HOSTNAME\"} $size_bytes" >> /tmp/metrics.tmp
+                done
+                mv /tmp/metrics.tmp /tmp/metrics
+                sleep {{ .Values.relocation.telemetry.scan_interval_seconds | default 300 }}
+              done &
+
+              # Foreground loop: serve /tmp/metrics on :9091.
+              while true; do
+                nc -lk -p 9091 -e /bin/sh -c "echo -e 'HTTP/1.1 200 OK\nContent-Type: text/plain\n'; cat /tmp/metrics 2>/dev/null || echo ''"
+              done
+          ports:
+            - name: metrics-tenant
+              containerPort: 9091
+              protocol: TCP
+          volumeMounts:
+            - name: data
+              mountPath: /data
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: {{ .Values.relocation.telemetry.sidecar_resources.requests.cpu }}
+              memory: {{ .Values.relocation.telemetry.sidecar_resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.relocation.telemetry.sidecar_resources.limits.cpu }}
+              memory: {{ .Values.relocation.telemetry.sidecar_resources.limits.memory }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+        {{- end }}
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "aegis-statefulset.labels" . | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.storage.storage_class }}
+        resources:
+          requests:
+            storage: {{ .Values.stateful.cells.storage_per_pod }}

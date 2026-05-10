@@ -1,0 +1,108 @@
+# Namespace manifests for the 3-tier flow + supporting infrastructure.
+#
+# Pod Security Standards (PSS) are enforced at namespace level via labels.
+# All five namespaces below run at PSS `restricted` — the strictest tier.
+# Workloads that legitimately need to relax this (none in current scope)
+# would be flagged in their respective ADR with explicit exception.
+#
+# Labels applied:
+#   - app.kubernetes.io/name        : namespace identifier
+#   - app.kubernetes.io/part-of     : aegis-statefulset (project grouping)
+#   - app.kubernetes.io/managed-by  : argocd (or terraform for cluster-controller namespaces)
+#   - tier                           : edge | api | router | state | infra | observability
+#   - pod-security.kubernetes.io/*  : enforce / warn / audit at restricted
+#
+# Wired into the cluster either by ArgoCD (gitops/argocd/applications/namespaces.yaml,
+# Sync wave -1 — must apply before any namespaced workload) or by terraform's
+# helm_release with `create_namespace = true` for the controller layer.
+#
+# References: ADR-07 (security & runtime), ADR-08 (CI/CD & GitOps).
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aegis-app
+  labels:
+    app.kubernetes.io/name: aegis-app
+    app.kubernetes.io/part-of: aegis-statefulset
+    app.kubernetes.io/managed-by: argocd
+    tier: state
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+    description: "Stateful tier — per-tenant pods, EBS-backed PVCs, retained on PVC deletion."
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: api-tier
+  labels:
+    app.kubernetes.io/name: api-tier
+    app.kubernetes.io/part-of: aegis-statefulset
+    app.kubernetes.io/managed-by: argocd
+    tier: api
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+    description: "Stateless API tier — auth, business logic; receives traffic from ALB, forwards to Envoy router."
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: envoy
+  labels:
+    app.kubernetes.io/name: envoy
+    app.kubernetes.io/part-of: aegis-statefulset
+    app.kubernetes.io/managed-by: argocd
+    tier: router
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+    description: "Envoy router with custom Lua filter — DynamoDB placement-table lookup, 3-mode cache invalidation."
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/part-of: aegis-statefulset
+    app.kubernetes.io/managed-by: terraform
+    tier: infra
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+  annotations:
+    description: "Velero — Layer-3 cold DR per ADR-04. Owned by terraform helm_release per ADR-04 ownership boundary."
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app.kubernetes.io/name: monitoring
+    app.kubernetes.io/part-of: aegis-statefulset
+    app.kubernetes.io/managed-by: argocd
+    tier: observability
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+    description: "OpenTelemetry Collector + Prometheus + Blackbox Exporter; ships to Grafana Cloud per ADR-06."
