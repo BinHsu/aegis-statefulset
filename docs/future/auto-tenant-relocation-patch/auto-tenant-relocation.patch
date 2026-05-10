@@ -27,7 +27,7 @@ diff --git a/helm/aegis-statefulset/templates/relocation-controller.yaml b/helm/
 new file mode 100644
 --- /dev/null
 +++ b/helm/aegis-statefulset/templates/relocation-controller.yaml
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,84 @@
 +# Per-tenant relocation controller — auto-schedules hot-tenant moves
 +# during the customer-specified maintenance window.
 +#
@@ -116,7 +116,7 @@ diff --git a/infrastructure/lambda/relocation-controller/relocator.py b/infrastr
 new file mode 100644
 --- /dev/null
 +++ b/infrastructure/lambda/relocation-controller/relocator.py
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,114 @@
 +"""
 +Relocation controller — runs as CronJob in customer's maintenance window.
 +Identifies hot tenants from per-tenant metrics ConfigMap; schedules

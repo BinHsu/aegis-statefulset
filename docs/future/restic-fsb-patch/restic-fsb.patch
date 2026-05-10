@@ -37,7 +37,7 @@ Verify: terraform validate + helm lint after apply
 diff --git a/infrastructure/terraform/cluster-controllers.tf b/infrastructure/terraform/cluster-controllers.tf
 --- a/infrastructure/terraform/cluster-controllers.tf
 +++ b/infrastructure/terraform/cluster-controllers.tf
-@@ -123,6 +123,16 @@
+@@ -123,9 +123,22 @@
    set {
      name  = "serviceAccount.server.annotations.eks\\.amazonaws\\.com/role-arn"
      value = aws_iam_role.velero.arn
@@ -63,7 +63,7 @@ diff --git a/infrastructure/terraform/cluster-controllers.tf b/infrastructure/te
 diff --git a/helm/aegis-statefulset/templates/velero-schedule-dr.yaml b/helm/aegis-statefulset/templates/velero-schedule-dr.yaml
 --- a/helm/aegis-statefulset/templates/velero-schedule-dr.yaml
 +++ b/helm/aegis-statefulset/templates/velero-schedule-dr.yaml
-@@ -29,12 +29,17 @@
+@@ -29,13 +29,16 @@
        - velero
        - karpenter
        - argocd

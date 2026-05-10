@@ -28,7 +28,7 @@ diff --git a/infrastructure/terraform/route53-health-failover.tf b/infrastructur
 new file mode 100644
 --- /dev/null
 +++ b/infrastructure/terraform/route53-health-failover.tf
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,93 @@
 +# Route 53 health-check-driven failover.
 +#
 +# Per docs/operations/automation-tiers.md § 2b — flips region-cutover from
@@ -126,7 +126,7 @@ diff --git a/infrastructure/terraform/lambda-auto-region-cutover.tf b/infrastruc
 new file mode 100644
 --- /dev/null
 +++ b/infrastructure/terraform/lambda-auto-region-cutover.tf
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,126 @@
 +# Lambda triggered by Route 53 health-check state-change events.
 +# Runs Velero restore in the DR region to bring up the application
 +# after the health-check transition has shifted DNS weight.
@@ -257,7 +257,7 @@ diff --git a/infrastructure/lambda/auto-region-cutover/index.py b/infrastructure
 new file mode 100644
 --- /dev/null
 +++ b/infrastructure/lambda/auto-region-cutover/index.py
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,82 @@
 +"""
 +Lambda body for auto-region-cutover triggered by Route 53 health-check
 +transition events.

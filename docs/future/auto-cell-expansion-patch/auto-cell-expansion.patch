@@ -31,7 +31,7 @@ diff --git a/helm/aegis-statefulset/templates/cell-expander-controller.yaml b/he
 new file mode 100644
 --- /dev/null
 +++ b/helm/aegis-statefulset/templates/cell-expander-controller.yaml
-@@ -0,0 +1,108 @@
+@@ -0,0 +1,101 @@
 +# Cell-expander custom controller — auto-provisions new cells when
 +# tenant_storage_bytes crosses threshold AND budget headroom available.
 +#
@@ -137,7 +137,7 @@ diff --git a/infrastructure/lambda/cell-expander/expander.py b/infrastructure/la
 new file mode 100644
 --- /dev/null
 +++ b/infrastructure/lambda/cell-expander/expander.py
-@@ -0,0 +1,113 @@
+@@ -0,0 +1,119 @@
 +"""
 +Cell-expander controller body.
 +
@@ -261,7 +261,7 @@ diff --git a/infrastructure/terraform/iam-cell-expander.tf b/infrastructure/terr
 new file mode 100644
 --- /dev/null
 +++ b/infrastructure/terraform/iam-cell-expander.tf
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,47 @@
 +# IRSA role for cell-expander controller. Allows EKS cluster API access
 +# scoped to the cell-expander ServiceAccount in the application namespace.
 +
