@@ -1,0 +1,187 @@
+{
+  "__comment": "K8s platform health dashboard. Tracks node readiness by AZ, pod restart rate, PV attach/detach latency (Tier 2e in automation-tiers.md), Karpenter consolidation events, and pending pods. The dashboard surfaces the boring-everyday platform state — when these panels stay green, Tier 1 auto-recovery is working as designed.",
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "icon": "external link",
+      "tags": ["k8s"],
+      "title": "Automation tiers",
+      "type": "link",
+      "url": "/docs/operations/automation-tiers.md"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Node Ready count by AZ",
+      "description": "Ready nodes per AZ. The stateful tier runs in the master AZ only; the other two AZs hold warm-standby capacity. A drop in the master AZ is the trigger for AZ rotation per ADR-04.",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (zone) (kube_node_status_condition{condition=\"Ready\",status=\"true\"} * on(node) group_left(zone) kube_node_labels{label_topology_kubernetes_io_zone!=\"\"})",
+          "legendFormat": "{{zone}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Pod restart rate (rolling 1h)",
+      "description": "Pod restarts per hour. Rate above the alert threshold means CrashLoopBackOff is outpacing kubelet's auto-recovery and operator action is needed. The threshold sits at 5/h to keep the panel quiet during normal rolling deploys.",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (namespace) (rate(kube_pod_container_status_restarts_total{namespace=~\"aegis-app|api-tier|envoy\"}[1h])) * 3600",
+          "legendFormat": "{{namespace}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 5},
+              {"color": "red", "value": 20}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "PV attach / detach latency (P50 / P99)",
+      "description": "Time between PV attach request and the volume becoming usable. P99 spikes above 5 minutes are the EBS-CSI attach-detach stuck case (Tier 2e). Operator runs scripts/dr/force-detach-pv.sh after confirming the previous instance is dead.",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, rate(csi_sidecar_operations_seconds_bucket{operation_name=\"ControllerPublishVolume\"}[5m]))",
+          "legendFormat": "P50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.99, rate(csi_sidecar_operations_seconds_bucket{operation_name=\"ControllerPublishVolume\"}[5m]))",
+          "legendFormat": "P99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {"mode": "palette-classic"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 60},
+              {"color": "red", "value": 300}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "Karpenter consolidation events (rolling 24h)",
+      "description": "Count of Karpenter consolidation actions per hour. High activity is normal for stateless workloads with spot mix. Sudden zero may mean the Karpenter controller has crashed; sudden spike may indicate cost-runaway in stateless capacity.",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (action) (increase(karpenter_consolidation_actions_total[1h]))",
+          "legendFormat": "{{action}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Pending pods — scheduler backlog",
+      "description": "Pods stuck in Pending state. Stateful pods stuck means the EBS-CSI attach is wedged or no node satisfies the AZ constraint. Stateless stuck means Karpenter is slow to provision and capacity is tight.",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 16},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (namespace) (kube_pod_status_phase{phase=\"Pending\",namespace=~\"aegis-app|api-tier|envoy\"})",
+          "legendFormat": "{{namespace}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 3}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["k8s", "platform", "ops"],
+  "templating": {
+    "list": [
+      {"name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus"}
+    ]
+  },
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {"refresh_intervals": ["30s", "1m", "5m", "15m"]},
+  "timezone": "browser",
+  "title": "K8s platform health",
+  "uid": "aegis-k8s-platform-health",
+  "version": 1,
+  "weekStart": ""
+}

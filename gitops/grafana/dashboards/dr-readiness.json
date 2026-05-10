@@ -1,0 +1,217 @@
+{
+  "__comment": "DR readiness dashboard per ADR-04. Tracks the upstream conditions that determine whether a region cutover (Path C) will succeed: DR cluster health, cross-region S3 replication freshness, Velero BSL availability in DR region, and the last DR drill outcome. A green row here is the precondition for the operator to trust the cutover runbook.",
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": "${DS_PROMETHEUS}",
+        "enable": true,
+        "iconColor": "purple",
+        "name": "DR drill events",
+        "expr": "ALERTS{alertname=~\"DRDrillStarted|DRDrillCompleted|DRDrillFailed|DRClusterUnhealthy|RegionCutoverStarted|RegionCutoverCompleted\",alertstate=\"firing\"}",
+        "titleFormat": "{{alertname}}",
+        "tagKeys": "phase,region"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "icon": "external link",
+      "tags": ["dr"],
+      "title": "Region failure runbook",
+      "type": "link",
+      "url": "/docs/operations/region-failure-recovery.md"
+    },
+    {
+      "icon": "external link",
+      "tags": ["dr"],
+      "title": "ADR-04 — backup, DR & HA",
+      "type": "link",
+      "url": "/docs/adr/ADR-04-backup-dr-and-ha.md"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "DR cluster Route 53 health-check status",
+      "description": "Route 53 health-check state for the DR-region ALB. Healthy means the failover record will route traffic on cutover. Unhealthy here means cutover would land on a dead endpoint — investigate before any drill or real cutover.",
+      "type": "stat",
+      "datasource": {"type": "cloudwatch", "uid": "${DS_CLOUDWATCH}"},
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "namespace": "AWS/Route53",
+          "metricName": "HealthCheckStatus",
+          "statistic": "Minimum",
+          "dimensions": {"HealthCheckId": "aegis-dr-region"},
+          "alias": "dr-region-healthcheck"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "mappings": [
+            {"type": "value", "options": {"0": {"text": "Unhealthy"}, "1": {"text": "Healthy"}}}
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Cross-region S3 replication freshness",
+      "description": "Age of the latest object replicated to the DR-region BSL bucket. Sub-15-min is the ADR-04 target. Above 30 min means the DR tier's effective RPO has degraded even if Schedule B is firing on time.",
+      "type": "timeseries",
+      "datasource": {"type": "cloudwatch", "uid": "${DS_CLOUDWATCH}"},
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "namespace": "AWS/S3",
+          "metricName": "ReplicationLatency",
+          "statistic": "Maximum",
+          "dimensions": {"SourceBucket": "aegis-velero-bsl-source", "DestinationBucket": "aegis-velero-bsl-dr"},
+          "alias": "replication-lag-seconds"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 900},
+              {"color": "red", "value": 1800}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Velero BSL availability — DR region",
+      "description": "Velero backup-storage-location availability state in the DR region. Available means Velero can read the replicated BSL bucket on cutover. Unavailable means restore will fail — operator must fix BSL before any cutover attempt.",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 6},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "velero_backup_storage_location_phase{phase=\"Available\",location=\"dr-region\"}",
+          "legendFormat": "BSL available (DR)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "DR drill — last quarterly outcome",
+      "description": "Outcome of the most recent quarterly DR drill (per dr-drill.yml CI workflow). Green means Path A / B / C all completed inside the runbook's documented RTO budget. Red means a path failed and the runbook needs revision before the next drill.",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 6},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(dr_drill_outcome{result=\"success\"}) - max(dr_drill_outcome{result=\"failure\"})",
+          "legendFormat": "last drill"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "mappings": [
+            {"type": "value", "options": {"-1": {"text": "Failed"}, "0": {"text": "Pending"}, "1": {"text": "Passed"}}}
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 0},
+              {"color": "green", "value": 1}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "DR cluster scale-readiness — node groups in target region",
+      "description": "Node-group desired and ready counts in the DR region. Cold-DR design keeps desired=0 in normal operation; the cutover runbook scales these up. The panel exists so an operator can spot subnet / IAM / EKS misconfiguration before triggering cutover, when the runbook would otherwise fail at scale-up time.",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kube_node_status_capacity{cluster=\"aegis-dr\", resource=\"cpu\"}",
+          "legendFormat": "{{node}} (CPU capacity)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["dr", "readiness", "adr-04"],
+  "templating": {
+    "list": [
+      {"name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus"},
+      {"name": "DS_CLOUDWATCH", "type": "datasource", "query": "cloudwatch"}
+    ]
+  },
+  "time": {"from": "now-7d", "to": "now"},
+  "timepicker": {"refresh_intervals": ["5m", "15m", "1h", "6h"]},
+  "timezone": "browser",
+  "title": "DR readiness (per ADR-04)",
+  "uid": "aegis-dr-readiness",
+  "version": 1,
+  "weekStart": ""
+}

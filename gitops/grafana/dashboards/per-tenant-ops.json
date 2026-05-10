@@ -1,0 +1,194 @@
+{
+  "__comment": "Per-tenant operational dashboard. Surfaces per-tenant request rate, IOPS share, storage growth, and hot-spot indicator. Feeds the relocation decision per ADR-04 + automation-tiers.md Tier 2d. The dashboard is deliberately read-only: it shows the operator who is hot, not which tenant to move — that decision needs scheduling context the dashboard does not have.",
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": "${DS_PROMETHEUS}",
+        "enable": true,
+        "iconColor": "blue",
+        "name": "Relocation events",
+        "expr": "ALERTS{alertname=~\"HotTenantDetected|TenantRelocationStarted|TenantRelocationCompleted\",alertstate=\"firing\"}",
+        "titleFormat": "{{alertname}}",
+        "tagKeys": "tenant_id,cell_id"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "icon": "external link",
+      "tags": ["tenant"],
+      "title": "Per-tenant relocation",
+      "type": "link",
+      "url": "/docs/operations/per-tenant-relocation.md"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Top 10 tenants by request rate",
+      "description": "Per-tenant request rate over the last 5 minutes, sorted high-to-low. The top of this list is where customer impact is concentrated. Sudden new entry to the top means a tenant has changed traffic shape — investigate before the cell saturates.",
+      "type": "table",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, sum by (tenant_id) (rate(http_requests_total{namespace=\"aegis-app\"}[5m])))",
+          "legendFormat": "{{tenant_id}}",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {"mode": "thresholds"}
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 2,
+      "title": "Top 10 tenants by IOPS share (% of cell capacity)",
+      "description": "Per-tenant share of the cell's EBS IOPS. A tenant above 70% is the hot-spot definition in automation-tiers.md Tier 2d. Sustained 70%+ means the tenant is starving the rest of the cell — relocation candidate.",
+      "type": "table",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, sum by (tenant_id) (rate(tenant_iops_total[5m])) / on(cell_id) group_left sum by (cell_id) (cell_iops_capacity) * 100)",
+          "legendFormat": "{{tenant_id}}",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 50},
+              {"color": "red", "value": 70}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Per-tenant storage growth — last 24h",
+      "description": "Storage delta per tenant over the last 24 hours. Used for capacity-plan forecasting. A tenant with sustained growth above the cell's headroom budget is the cell-expansion trigger per ADR-04 + automation-tiers.md Tier 2c.",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 10},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, increase(tenant_storage_bytes[24h]))",
+          "legendFormat": "{{tenant_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "Hot-spot indicator — tenants over threshold",
+      "description": "Count of tenants currently above the 70% IOPS or storage threshold. Zero means no hot-spot. Above zero is the trigger to consult the relocation runbook. The number does not mean those tenants will move — that is a scheduling decision.",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 18},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(tenant_iops_share_pct > 70 or tenant_storage_share_pct > 70)",
+          "legendFormat": "hot tenants"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 3}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Relocation eligibility — tenants by readiness",
+      "description": "Per-tenant readiness for relocation: backup-fresh, no in-flight write, target cell has headroom. Operators read this panel before triggering scripts/relocation/per-tenant-relocate.sh. A tenant flagged ineligible has a specific reason in the table label.",
+      "type": "table",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 18},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "tenant_relocation_eligible",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "mappings": [
+            {"type": "value", "options": {"0": {"text": "Ineligible"}, "1": {"text": "Eligible"}}}
+          ]
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["tenant", "ops", "relocation", "adr-04"],
+  "templating": {
+    "list": [
+      {"name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus"}
+    ]
+  },
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {"refresh_intervals": ["30s", "1m", "5m", "15m"]},
+  "timezone": "browser",
+  "title": "Per-tenant operations",
+  "uid": "aegis-per-tenant-ops",
+  "version": 1,
+  "weekStart": ""
+}

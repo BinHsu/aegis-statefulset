@@ -1,0 +1,226 @@
+{
+  "__comment": "Backup health dashboard per ADR-04 + ADR-06. Tracks Velero schedule execution status, RPO drift against the configurable cadence (default 5-min operational + 4-hour DR), cross-region S3 replication lag, EBS snapshot retention bucket counts, and failed backup attempts. The chaos demo expects last-success and replication-lag panels to remain green during normal operation; a red transition is the leading indicator that backup pipeline integrity has degraded ahead of any RPO breach.",
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": "${DS_PROMETHEUS}",
+        "enable": true,
+        "iconColor": "orange",
+        "name": "Backup events",
+        "expr": "ALERTS{alertname=~\"VeleroBackupFailed|VeleroScheduleStalled|RPODriftWarning|RPODriftCritical|CrossRegionReplicationLag\",alertstate=\"firing\"}",
+        "titleFormat": "{{alertname}}",
+        "tagKeys": "schedule,severity"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "icon": "external link",
+      "tags": ["backup"],
+      "title": "ADR-04 — backup, DR & HA",
+      "type": "link",
+      "url": "/docs/adr/ADR-04-backup-dr-and-ha.md"
+    },
+    {
+      "icon": "external link",
+      "tags": ["backup"],
+      "title": "Why Velero, not Restic",
+      "type": "link",
+      "url": "/docs/operations/why-velero-not-restic.md"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Velero schedule execution — last success age",
+      "description": "Time since each Velero schedule's most recent successful backup. Schedule A (operational, 5-min cadence) should stay under ~6 min; Schedule B (DR, 4-hour cadence) under ~5 hours. Crossing the threshold turns the panel red ahead of any spec-RPO breach.",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - max by (schedule) (velero_backup_last_successful_timestamp{schedule=~\"aegis-.*\"})",
+          "legendFormat": "{{schedule}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 360},
+              {"color": "red", "value": 21600}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "RPO drift — current cadence vs configured target",
+      "description": "Continuous gauge of the actual RPO (time-since-last-successful-backup) for the operational tier vs the customer-configured cadence target (default 5 min). Sustained drift means the backup pipeline is slower than the cadence schedule expects — operator intervention before the spec RPO ceiling is breached.",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - velero_backup_last_successful_timestamp{schedule=\"aegis-operational\"}",
+          "legendFormat": "actual RPO (operational)"
+        },
+        {
+          "refId": "B",
+          "expr": "vector(300)",
+          "legendFormat": "target cadence (5 min)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Cross-region S3 replication lag",
+      "description": "Time delta between source-region BSL bucket and DR-region replicated bucket. ADR-04 expects sub-15-min replication for the FSB Kopia chunks. Sustained lag above 30 min triggers alert — replication backlog can mask an effective RPO breach in the DR tier.",
+      "type": "timeseries",
+      "datasource": {"type": "cloudwatch", "uid": "${DS_CLOUDWATCH}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "namespace": "AWS/S3",
+          "metricName": "ReplicationLatency",
+          "statistic": "Maximum",
+          "dimensions": {"SourceBucket": "aegis-velero-bsl-source", "DestinationBucket": "aegis-velero-bsl-dr"},
+          "alias": "replication-lag"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 900},
+              {"color": "red", "value": 1800}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "EBS snapshot count by retention bucket",
+      "description": "Distribution of EBS snapshots across the retention buckets defined in ADR-04 (hourly / daily / weekly / monthly / quarterly). The hourly bucket should stay around 24×7 = 168 snapshots; sudden drop indicates retention policy or cleanup misconfiguration.",
+      "type": "timeseries",
+      "datasource": {"type": "cloudwatch", "uid": "${DS_CLOUDWATCH}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "namespace": "Aegis/Backup",
+          "metricName": "SnapshotCount",
+          "statistic": "Maximum",
+          "dimensions": {"RetentionBucket": "hourly"},
+          "alias": "hourly"
+        },
+        {
+          "refId": "B",
+          "namespace": "Aegis/Backup",
+          "metricName": "SnapshotCount",
+          "statistic": "Maximum",
+          "dimensions": {"RetentionBucket": "daily"},
+          "alias": "daily"
+        },
+        {
+          "refId": "C",
+          "namespace": "Aegis/Backup",
+          "metricName": "SnapshotCount",
+          "statistic": "Maximum",
+          "dimensions": {"RetentionBucket": "weekly"},
+          "alias": "weekly"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Failed backup attempts (rolling 24h)",
+      "description": "Velero backup failures over the last 24 hours, broken out by schedule. Any non-zero count requires operator review — backup failures are silent until the operator checks; this panel makes them visible.",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 16},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (schedule) (increase(velero_backup_failure_total{schedule=~\"aegis-.*\"}[24h]))",
+          "legendFormat": "{{schedule}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 3}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["backup", "dr", "rpo", "adr-04"],
+  "templating": {
+    "list": [
+      {"name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus"},
+      {"name": "DS_CLOUDWATCH", "type": "datasource", "query": "cloudwatch"}
+    ]
+  },
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {"refresh_intervals": ["1m", "5m", "15m", "1h"]},
+  "timezone": "browser",
+  "title": "Backup health (per ADR-04)",
+  "uid": "aegis-backup-health",
+  "version": 1,
+  "weekStart": ""
+}

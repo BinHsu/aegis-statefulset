@@ -1,0 +1,205 @@
+{
+  "__comment": "Security and audit dashboard. Tracks IAM AssumeRole anomaly, OIDC token issuance flow, GuardDuty findings by severity, CloudTrail anomalies, and kubeconform CI failures over 30 days. Audit-grade visibility per ADR-08; the auditor reads this dashboard during an annual ISO 27001 review and expects every panel to have a defensible green-state explanation.",
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": "${DS_PROMETHEUS}",
+        "enable": true,
+        "iconColor": "red",
+        "name": "Security alerts",
+        "expr": "ALERTS{alertname=~\"GuardDutyHighSeverity|CloudTrailAnomaly|IAMAssumeRoleAnomaly|OIDCTokenFailure\",alertstate=\"firing\"}",
+        "titleFormat": "{{alertname}}",
+        "tagKeys": "severity,resource"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "icon": "external link",
+      "tags": ["security"],
+      "title": "ADR-08 — CI/CD and GitOps",
+      "type": "link",
+      "url": "/docs/adr/ADR-08-cicd-and-gitops.md"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "IAM AssumeRole — anomaly detection",
+      "description": "AssumeRole calls per hour, broken out by role. Sudden spike on a role that normally fires hourly is the leading signal for credential misuse or a runaway script. The auditor expects 'normal' baselines documented in ADR-08.",
+      "type": "timeseries",
+      "datasource": {"type": "cloudwatch", "uid": "${DS_CLOUDWATCH}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "namespace": "AWS/CloudTrail",
+          "metricName": "AssumeRoleCallCount",
+          "statistic": "Sum",
+          "alias": "assume-role-calls"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "OIDC token issuance — flow + failures",
+      "description": "GitHub Actions OIDC token requests vs failures. Failures here mean a workflow tried to assume an AWS role but the trust policy rejected the token. Sustained failure rate above zero means a workflow is misconfigured or under attempted abuse.",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(oidc_token_request_total[5m]))",
+          "legendFormat": "requests/sec"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(oidc_token_request_failed_total[5m]))",
+          "legendFormat": "failures/sec"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "GuardDuty findings — by severity (last 7d)",
+      "description": "GuardDuty findings over the past 7 days, grouped by severity. High and critical findings need same-day operator review and a postmortem entry per ADR-08. Medium findings batch into the weekly security review.",
+      "type": "stat",
+      "datasource": {"type": "cloudwatch", "uid": "${DS_CLOUDWATCH}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "namespace": "AWS/GuardDuty",
+          "metricName": "FindingsByCriticality",
+          "statistic": "Sum",
+          "dimensions": {"Severity": "High"},
+          "alias": "high"
+        },
+        {
+          "refId": "B",
+          "namespace": "AWS/GuardDuty",
+          "metricName": "FindingsByCriticality",
+          "statistic": "Sum",
+          "dimensions": {"Severity": "Medium"},
+          "alias": "medium"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 5}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "CloudTrail anomalies — unauthorised API calls",
+      "description": "Count of API calls returning AccessDenied or UnauthorizedOperation in the last 24 hours. Non-zero is normal (humans typo IAM policies) but a spike pattern is the early signal for a probe attack or a service account drift.",
+      "type": "timeseries",
+      "datasource": {"type": "cloudwatch", "uid": "${DS_CLOUDWATCH}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "namespace": "AWS/CloudTrail",
+          "metricName": "ErrorCount",
+          "statistic": "Sum",
+          "dimensions": {"ErrorCode": "AccessDenied"},
+          "alias": "AccessDenied"
+        },
+        {
+          "refId": "B",
+          "namespace": "AWS/CloudTrail",
+          "metricName": "ErrorCount",
+          "statistic": "Sum",
+          "dimensions": {"ErrorCode": "UnauthorizedOperation"},
+          "alias": "UnauthorizedOperation"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Kubeconform CI failures — rolling 30 days",
+      "description": "Daily count of pre-commit and CI runs where kubeconform rejected a manifest. Used as a leading indicator that schema drift is creeping in. The hook catches most of these locally; CI count above zero on most days suggests a developer is bypassing the local hook.",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (workflow) (increase(kubeconform_failure_total[1d]))",
+          "legendFormat": "{{workflow}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["security", "audit", "iso-27001", "adr-08"],
+  "templating": {
+    "list": [
+      {"name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus"},
+      {"name": "DS_CLOUDWATCH", "type": "datasource", "query": "cloudwatch"}
+    ]
+  },
+  "time": {"from": "now-7d", "to": "now"},
+  "timepicker": {"refresh_intervals": ["5m", "15m", "1h", "6h"]},
+  "timezone": "browser",
+  "title": "Security & audit",
+  "uid": "aegis-security-audit",
+  "version": 1,
+  "weekStart": ""
+}
