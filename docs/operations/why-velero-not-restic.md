@@ -7,7 +7,7 @@
 
 ## TL;DR
 
-The spec named Restic + LVM as the canonical 2 TB-pod backup pattern. That naming reflected the 2018–2022 industry default, before Velero's CSI Snapshot integration matured. In 2026, on EBS-backed Kubernetes at TB scale, evaluated against the spec's actual constraints (RPO ≤ 6 h explicit, RTO unspecified) and our chosen architecture targets (5-min cadence default, ~25 min AZ-failure RTO), **Velero + EBS Snapshot wins on three load-bearing dimensions** (cadence floor, restore time, application-pod resource cost) over a Velero + FSB (Kopia / Restic) deployment, and wins by a wider margin over a hand-rolled Restic + LVM pipeline.
+The spec named Restic + LVM as the canonical 2 TB-pod backup pattern. That naming reflected the 2018–2022 industry default, before Velero's Container Storage Interface (CSI) Snapshot integration matured. In 2026, on EBS-backed Kubernetes at TB scale, evaluated against the spec's actual constraints (RPO ≤ 6 h explicit, RTO unspecified) and our chosen architecture targets (5-min cadence default, ~25 min AZ-failure RTO), **Velero + EBS Snapshot wins on three load-bearing dimensions** (cadence floor, restore time, application-pod resource cost) over a Velero + File System Backup (FSB) path deployment using Kopia / Restic, and wins by a wider margin over a hand-rolled Restic + LVM pipeline.
 
 LVM stays in the toolchain — application-consistency hooks (fsfreeze + LVM thin snapshot) give LevelDB a stable view to snapshot from. The orchestrator and the transport layer change: Velero replaces a custom Restic pipeline; EBS Snapshot replaces Restic's S3-chunked-upload as the data-movement primitive.
 
@@ -356,7 +356,7 @@ Once the customer accepts Velero as the orchestrator, the choice between CSI pat
 
 | | CSI path | FSB path |
 |---|---|---|
-| Cross-region transport | Velero VolumeSnapshotLocations multi-region; `snapshotMoveData: true` invokes EBS `CopySnapshot` per Schedule | S3 cross-region replication of BSL bucket(s) — bucket-level, not Schedule-level |
+| Cross-region transport | Velero VolumeSnapshotLocations multi-region; `snapshotMoveData: true` invokes EBS `CopySnapshot` per Schedule | S3 cross-region replication of Backup Storage Location (BSL — Velero's S3-bucket abstraction) bucket(s) — bucket-level, not Schedule-level |
 | Per-Schedule cross-region toggle | ✅ `snapshotMoveData: true/false` per Schedule, choose which Schedules replicate | ❌ Bucket-level — anything written to a replicated bucket replicates; can't toggle per backup |
 | Dual-cadence (operational tight + DR loose) support | ✅ Native: Schedule A `snapshotMoveData: false` + Schedule B `snapshotMoveData: true` | ❌ Requires **dual-bucket pattern**: separate `velero-bsl-operational` (no replication) + `velero-bsl` (replicated), two Schedules each pointing to its own BSL |
 | Architectural complexity | One BSL bucket + multi-region VSL | Two BSL buckets + two Schedules + per-Schedule storageLocation routing |

@@ -7,8 +7,8 @@ Accepted (POC submission scope)
 
 1. **Cold DR via Velero + EBS Snapshot.** No active-passive standby pods. AZ failure = manual rotation: scale the standby AZ node group from `desired=0` via `aws eks update-nodegroup-config`, then Velero restore from the latest in-region EBS Snapshot. RTO ~25 min for AZ failure.
 2. **Dual-cadence pattern: operational tier + DR tier.** Two independent Velero `Schedule` CRDs:
-   - **Schedule A (operational):** 5-min cadence default. `snapshotMoveData: false`, source-region only, BSL `velero_bsl_operational` (no replication). For fast roll-back of bad deploys / accidental state corruption. RPO ~30 sec.
-   - **Schedule B (DR tier):** 4-hour cadence default. `snapshotMoveData: true`, both `source-region` + `dr-region` VolumeSnapshotLocations, BSL `velero_bsl` (cross-region replicated). For region-failure recovery.
+   - **Schedule A (operational):** 5-min cadence default. `snapshotMoveData: false`, source-region only, Backup Storage Location (BSL) `velero_bsl_operational` — Velero's S3-bucket abstraction, no cross-region replication. For fast roll-back of bad deploys / accidental state corruption. RPO ~30 sec.
+   - **Schedule B (DR tier):** 4-hour cadence default. `snapshotMoveData: true`, both `source-region` + `dr-region` VolumeSnapshotLocations (VSL), BSL `velero_bsl` (cross-region replicated). For region-failure recovery.
    - **Cadence math:** spec RPO ≤ 6 h; DR cadence + backup-duration + retry-margin ≤ ceiling. 4h + 15min + 30min = 4h45m ≤ 6h (1h15m headroom). Sane DR upper bound 5h; 6h zero margin; daily breaches by 4×.
    - **Operator-tunable** via `backup.operational.cadence_minutes` (default 5) and `backup.dr.cadence_hours` (default 4).
 3. **Cross-region snapshot copy via Velero VolumeSnapshotLocations multi-region** (CSI path). Schedule B's `snapshotMoveData: true` invokes EBS `CopySnapshot` API to replicate to `dr_region` (default `eu-west-1`). DR snapshots stored as Glacier Instant Retrieval. Cross-region RTO ~50 min including Velero restore in the DR region. **Earlier architecture used AWS DLM lifecycle policy for cross-region copy; that approach was retired because DLM `target_tags` filter operates on volumes, not on the snapshot tags Velero applies — the configuration silently no-op'd. The Velero VSL multi-region pattern owns the cross-region copy directly via Velero, which keeps the K8s-context-aware orchestrator in charge end-to-end.**
@@ -33,10 +33,12 @@ Accepted (POC submission scope)
 ## Trade-offs accepted
 
 - **AZ rotation RTO floor is operator paging latency + decision time.** Typical 5-10 min from page to action. RTO ~25 min total for AZ failure recovery, dominated by node-group scale-up + Velero restore.
-- **Cross-region RTO is dominated by Velero restore (~25 min) + DLM snapshot import (~15-20 min).** ~50 min end-to-end is the floor for this DR shape.
+- **Cross-region RTO is dominated by Velero restore in the DR region (~25 min) + EBS `CopySnapshot` completion (~15–20 min for a 2 TB volume) before the snapshot is restorable.** ~50 min end-to-end is the floor for this DR shape.
 - **Cold DR has higher RTO than hot/warm DR options.** Defensible only because LevelDB physics make hot replicas expensive theatre.
 - **Master AZ asymmetry over cluster lifetime.** After several rotations, AZ-A might be the warm-standby for months while AZ-B serves. Operations team keeps all three AZ node groups patched and ready.
 - **Pattern 1 LDB layout makes per-tenant relocation expensive** (~1 month of tooling work to extract one tenant's keys cleanly). Pattern 2 is cheap (rsync the folder). Choice cascades to migration cost.
+- **EBS Fast Snapshot Restore (FSR) not enabled in POC.** FSR is the AWS feature that pre-warms a snapshot in a target AZ so volumes created from it deliver provisioned IOPS immediately, instead of lazy-loading blocks from S3 on first access. Without FSR, a restored 2 TB EBS volume serves first-touch reads at S3-replay throughput (~50–100 MB/s aggregate), which inflates the ~25 min AZ-rotation RTO toward the cold-cache tail until the working-set blocks are paged in. POC accepts this because the warm-standby AZ groups sit at `desired=0` and serve no traffic until rotation; FSR runs at ~$0.75/hour per AZ-snapshot pair while enabled (~$540/month/AZ). **Production trigger:** any cell whose RTO budget cannot absorb cold-cache lazy-load — enable FSR on the latest DR snapshot, scoped to the rotation target AZ.
+- **AWS EBS snapshot service quotas.** AWS enforces a default ceiling of 5 concurrent in-progress snapshots per volume, account- and region-scoped. At 5-min Schedule A cadence, a cell with multiple PVs can saturate the queue under sustained write load when consecutive snapshots stack. POC defaults `cells.count: 1` so this is non-binding; production deployments with `cells.count > 12` should request a quota increase via AWS Support before deploying, and operators should track snapshot queue depth as an early-warning signal in the backup-health dashboard.
 
 ## LDB layout — what each pattern enables
 
@@ -65,7 +67,7 @@ Pattern choice is application architecture, not platform. The architecture suppo
 - LDB layout — Pattern 1 vs Pattern 2? Cascades to relocation tooling cost.
 - Acceptable RTO ceiling for AZ failure. POC delivers ~25 min via cold DR; acceptable, or trigger for hot DR upgrade?
 - Backup-verification cadence in customer's existing practice.
-- **Granular file-level restore — is per-tenant LDB extract a product feature?** If yes, enabling Velero's FSB path alongside the CSI path becomes attractive (FSB makes single-file restore a one-liner). The diff to flip is documented in `docs/future/restic-fsb-patch.md`. If no, the CSI-only default stands.
+- **Granular file-level restore — is per-tenant LDB extract a product feature?** If yes, enabling Velero's File System Backup (FSB) path alongside the CSI path becomes attractive — FSB walks the filesystem with Restic / Kopia and makes single-file restore a one-liner; the trade-off is restore-time at TB scale. The diff to flip is documented in `docs/future/restic-fsb-patch.md`. If no, the CSI-only default stands.
 - **Customer's actual operational tolerance for storage-cost vs restore-time trade-off** — informs whether the cadence default and the CSI vs FSB choice both stay where the POC defaults put them.
 
 ## Cross-references

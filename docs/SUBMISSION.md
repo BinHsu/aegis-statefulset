@@ -22,7 +22,7 @@ anchor; every architectural decision in §§ 2–7 references back here.
 | Uptime SLA | **99.50%** for Team / Business; "SLA possible" for Enterprise [^pricing] | (spec implicit: "automatically recover from failures") | 99.5%+ achievable with ~25 min AZ-failure RTO target (well inside the 3.6h/month budget the SLA implies) |
 | RPO | **~24 hours** — "automatic backup of databases every day" [^security] | **≤ 6 hours** (spec, Backup & Restore section) | **5-min cadence default → ~30 sec typical RPO** (operator-tunable to 6h via `backup.cadence_minutes`) |
 | RTO | Not publicly stated | Not stated in spec | ~25 min AZ failure / ~50 min region (architecture's chosen target) |
-| Backup mechanism | "regularly generates incremental backups… secured at separate locations" [^security] | "Restic backup with LVM for 2 TB of data with each pod" | Velero + EBS Snapshot + DLM cross-region copy (Restic / Kopia FSB path documented as opt-in patch — see `docs/future/restic-fsb-patch.md`) |
+| Backup mechanism | "regularly generates incremental backups… secured at separate locations" [^security] | "Restic backup with LVM for 2 TB of data with each pod" | Velero + EBS Snapshot + AWS Data Lifecycle Manager (DLM) cross-region copy (Velero's File System Backup (FSB) path using Restic / Kopia is documented as an opt-in patch — see `docs/future/restic-fsb-patch.md`) |
 | DR feature | "high availability with automated fail-over and regular backups" — included across all tiers [^security] | "node and pod failures do not result in data loss" | Three-Layer DR (terraform / helm-via-tf / Velero); cold-DR posture; manual operator-gated rotation per `docs/operations/why-cold-dr.md` |
 
 [^pricing]: Customer's public pricing page (verified 2026-05-10). URL in the customer-specific grounding annex sent alongside this submission.
@@ -100,7 +100,7 @@ Layer 1 decisions are non-negotiable for the customer; the platform owns them.
 | L1.6 | Cross-region S3 replication of backups | Single-region durability is not a DR posture. (ADR-04.) |
 | L1.7 | Three-path DR with named RPO/RTO per path | Operators must know which path applies for which failure shape. (ADR-04.) |
 | L1.8 | Three-Layer DR — Layer 1 (Velero) cold + Layer 2 (Terraform helm_release) warm + Layer 3 (Route 53) DNS | Each layer recovers a different failure class without contention. (ADR-04.) |
-| L1.9 | SHA-pinned external image references | Supply-chain hygiene per NIST SSDF / SLSA L3. (ADR-09, ADR-09.) |
+| L1.9 | SHA-pinned external image references | Supply-chain hygiene per NIST Secure Software Development Framework (SSDF) / Supply-chain Levels for Software Artifacts (SLSA) L3. (ADR-09, ADR-09.) |
 | L1.10 | OpenTelemetry-only instrumentation | Vendor neutrality at the instrumentation layer; backend is reversible. (ADR-06, ADR-06.) |
 
 ---
@@ -136,7 +136,7 @@ Full inventory in `helm/aegis-statefulset/values.yaml`.
 | `storage.ebs_size_gb` | `2048` | `512` – `16384` | Per-pod EBS size; LVM-managed and online-expandable. |
 | `master_az` | `eu-central-1a` | any AZ in region | Master AZ for ALL workloads. Standby AZs `desiredSize=0`; rotation via `aws eks update-nodegroup-config` (ADR-01 modified, ADR-04). |
 | `dr_region` | `eu-west-1` | any AWS region | Cross-region DR target for EBS Snapshot copy via DLM (ADR-04). |
-| `observability.backend` | `grafana_cloud` | `grafana_cloud`, `amp_amg` | OTel-instrumented; backend reversible per ADR-06. |
+| `observability.backend` | `grafana_cloud` | `grafana_cloud`, `amp_amg` | OpenTelemetry (OTel)-instrumented; backend reversible per ADR-06. |
 
 ---
 
@@ -149,7 +149,7 @@ master AZ for the stateful tier with AZ-b / AZ-c warm-standby on
 `desired=0`; (2) the three-tier ingress flow ALB → API → Envoy →
 StatefulSet, with the placement-table lookup pinned at the Envoy layer
 so storage backends stay swappable; (3) Velero as backup orchestrator on
-the CSI Snapshot path, with chunks landing in source-region BSL and AWS
+the CSI Snapshot path, with chunks landing in the source-region Backup Storage Location (BSL — Velero's S3-bucket abstraction) and AWS
 S3 cross-region replication keeping the DR-region BSL fresh; (4) ArgoCD
 deploying every workload from chart + values, no manual `kubectl apply`;
 (5) Karpenter handling stateless capacity while StatefulSet stays pinned
@@ -179,7 +179,7 @@ thin snapshot captures the consistent volume; the CSI driver creates a
 VolumeSnapshot CR; Velero orchestrates the EBS Snapshot. Two schedules
 land at different cadences: Schedule A (operational, 5-min, source-region
 only) and Schedule B (DR, 4-hour, source plus cross-region S3 replication
-plus VSL cross-region snapshot copy).
+plus VolumeSnapshotLocation (VSL) cross-region snapshot copy).
 
 ### 5c. Three-tier multi-tenancy isolation (detail)
 
@@ -219,7 +219,7 @@ Three failure shapes, three paths, each with named RPO / RTO.
 The Three-Layer DR model (ADR-04) decouples these:
 - **Layer 1 (Velero, cold)** — application namespaces.
 - **Layer 2 (Terraform `helm_release`, warm)** — controllers (kube-system,
-  monitoring, kyverno, ESO, ArgoCD).
+  monitoring, kyverno, External Secrets Operator (ESO), ArgoCD).
 - **Layer 3 (Route 53, DNS)** — traffic.
 
 Each layer recovers a different failure class without contention.
@@ -238,7 +238,7 @@ Each layer recovers a different failure class without contention.
 | EBS Snapshot (5-min cadence, 30-day retention) | $300 | Velero schedule + DLM lifecycle |
 | Cross-region snapshot copy (Glacier Instant Retrieval) | $150 | DLM cross-region per ADR-04 |
 | S3 (Velero metadata + cross-region replication) | $50 | Backup metadata only; data lives in EBS Snapshots |
-| Observability (Grafana Cloud Pro) | $500 | OTel-instrumented; AMP/AMG alternative ~$700 |
+| Observability (Grafana Cloud Pro) | $500 | OpenTelemetry-instrumented; Amazon Managed Prometheus / Amazon Managed Grafana (AMP/AMG) alternative ~$700 |
 | **Total (cold DR, 5-min cadence, POC `cells.count=1`)** | **~$2,700** | Mittelstand budget; scales linearly with cell count |
 
 Cost knobs:
