@@ -203,6 +203,13 @@ exact evidence per checkpoint.
 # Pre-demo: open Grafana service-availability dashboard, start screen
 # recording, note baseline probe_success = 1.0
 
+# SEED data BEFORE chaos so we can verify integrity after recovery.
+# 100 keys is fine for the demo; more is OK too. The manifest lands in
+# chaos-evidence/<timestamp>-seed-pre-phase-1/manifest.json and is read
+# by every subsequent verify-test-data call.
+APP_URL=https://aegis-app.<your-domain> \
+  ./scripts/chaos/seed-test-data.sh 100
+
 # Checkpoint 1 of 3 — T+0 baseline
 ./scripts/chaos/capture-evidence.sh baseline
 
@@ -223,6 +230,11 @@ exact evidence per checkpoint.
 
 # Checkpoint 3 of 3 — T+~25 min, recovery complete in new master AZ
 ./scripts/chaos/capture-evidence.sh phase-1-recovery
+
+# Verify data integrity — reads back each test key, reports match rate
+APP_URL=https://aegis-app.<your-domain> \
+  ./scripts/chaos/verify-test-data.sh phase-1-recovery
+# match rate goes into DR report § 3.5 ({{P1_DATA_MATCH_N}} / {{P1_TEST_KEYS}})
 ```
 
 **Three Grafana screenshots — capture at each checkpoint** and save into the matching `chaos-evidence/<timestamp>-<label>/` directory as `screenshot-service-availability.png`:
@@ -253,6 +265,14 @@ flip + Velero restore in eu-west-1).
 
 # Checkpoint 5 of 5 — Phase 2 recovery complete
 ./scripts/chaos/capture-evidence.sh phase-2-recovery
+
+# Verify data integrity in the DR region (same manifest as Phase 1)
+APP_URL=https://aegis-app-dr.<your-domain> \
+  ./scripts/chaos/verify-test-data.sh phase-2-recovery
+# match rate goes into DR report § 4.4 ({{P2_DATA_MATCH_N}} / {{P2_TEST_KEYS}})
+# Note: Phase 2 RPO is the DR-tier cadence (4h default per ADR-04 dual-cadence),
+# so some keys written within the last 4h may not have replicated to DR — those
+# show up as "missing" in the verify report, NOT mismatches.
 ```
 
 **Expected:** ~50 min end-to-end RTO. The `phase-2-recovery` checkpoint

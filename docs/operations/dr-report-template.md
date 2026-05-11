@@ -103,9 +103,9 @@ Evidence: `chaos-evidence/{{P1_RECOVERY_DIR}}/`
 
 ### 3.5. Data integrity verification (Phase 1)
 
-- **Pre-failure:** wrote {{P1_TEST_KEYS}} test keys with known values (script: `scripts/chaos/seed-test-data.sh` `[TODO]`)
-- **Post-recovery:** read back all keys; matched against pre-failure manifest
-- **Match rate:** {{P1_DATA_MATCH_PCT}} ({{P1_DATA_MATCH_N}} of {{P1_TEST_KEYS}})
+- **Pre-failure:** wrote {{P1_TEST_KEYS}} test keys with known values via `scripts/chaos/seed-test-data.sh ${N}` (manifest at `chaos-evidence/<timestamp>-seed-pre-phase-1/manifest.json`)
+- **Post-recovery:** ran `scripts/chaos/verify-test-data.sh phase-1-recovery` — reads each key back via the app's HTTP GET and compares to manifest
+- **Match rate:** {{P1_DATA_MATCH_PCT}} ({{P1_DATA_MATCH_N}} of {{P1_TEST_KEYS}}; raw report at `chaos-evidence/<timestamp>-phase-1-recovery-verify/verify-report.json`)
 - **Data lost during {{RPO_OBSERVED}}-second window before snapshot:** {{P1_DATA_LOST}}
 
 ### 3.6. Grafana screenshots — Phase 1
@@ -157,8 +157,8 @@ Evidence: `chaos-evidence/{{P2_RECOVERY_DIR}}/`
 ### 4.4. Data integrity verification (Phase 2)
 
 - **Pre-failure:** {{P2_TEST_KEYS}} test keys verified at end of Phase 1
-- **Post-recovery in DR region:** read back all keys
-- **Match rate:** {{P2_DATA_MATCH_PCT}}
+- **Post-recovery in DR region:** ran `scripts/chaos/verify-test-data.sh phase-2-recovery` against the same manifest (DR-region app served via Route 53 cutover)
+- **Match rate:** {{P2_DATA_MATCH_PCT}} (raw report at `chaos-evidence/<timestamp>-phase-2-recovery-verify/verify-report.json`)
 - **Data lost during DR-tier cadence window ({{DR_CADENCE_HOURS}}h cadence):** {{P2_DATA_LOST}}
 
 ---
