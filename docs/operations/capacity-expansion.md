@@ -150,12 +150,15 @@ After the script returns 0:
    ```
    Should return all `3 × cells.per_az` pod IPs.
 
-3. **Backup CronJob auto-created for each new pod**.
+3. **Backup coverage extends to new pods automatically**.
    ```
-   kubectl get cronjobs -n aegis-app -l aegis.io/component=backup
+   kubectl get schedule -n velero
    ```
-   Helm reconciles these via `templates/backup-cronjob.yaml`. First
-   run lands on the next scheduled tick (usually within 24 h).
+   The Velero `Schedule` CRDs (`helm/aegis-statefulset/templates/velero-schedule-operational.yaml`
+   and `helm/aegis-statefulset/templates/velero-schedule-dr.yaml`, per ADR-04 dual-cadence pattern)
+   match every PVC in the namespace; new pods inherit the schedule with no
+   per-pod CronJob to provision. First snapshot lands on the next scheduled
+   tick (5 min for operational, 4 h for DR).
 
 4. **Placement service sees the new pods**.
    ```
@@ -235,5 +238,5 @@ automated. Document scope changes via ADR before attempting.
 | terraform apply hangs | EC2 ICE in one AZ | wait 5 min, retry; if persistent, escalate to AWS support |
 | nodes Ready but pods Pending | StorageClass / IRSA misconfig in new AZ | check pod events; verify IAM role for EBS CSI in new AZ |
 | pod count mismatch at verification | Helm timed out before all pods rolled | re-run helm upgrade; do NOT re-run terraform |
-| backup CronJobs not created | Helm chart template gap | check `templates/backup-cronjob.yaml` for hardcoded ordinals |
+| Velero `Schedule` not picking up new pods | Schedule's `includedNamespaces` filter or label selector mismatch | verify the new pods' namespace is in the Schedule's `includedNamespaces` and labels match the chart selectors (`helm/aegis-statefulset/templates/velero-schedule-operational.yaml`, `helm/aegis-statefulset/templates/velero-schedule-dr.yaml`) |
 | placement service still showing old cell count | service caches cell list | restart placement service pods; check ConfigMap reload |

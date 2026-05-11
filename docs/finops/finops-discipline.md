@@ -17,7 +17,7 @@ The standard failure mode is to treat cost as a finance concern that someone rec
 
 The same shift-left posture this platform already adopts for security (DevSecOps — pre-commit hooks, image signing, NetworkPolicy) and observability (OpenTelemetry first-day instrumentation) applies to cost. **Cost is architecture, not a finance afterthought.**
 
-For the full decision rationale, see `_context/adr/ADR-10-finops-as-architecture-discipline.md` (private) or its public variant when it lands in `docs/adr/`.
+For the full decision rationale, see [`docs/adr/ADR-10-finops.md`](../adr/ADR-10-finops.md).
 
 ---
 
@@ -238,11 +238,11 @@ See `scripts/finops/per-tenant-cost-attribution.sql` for the full set:
 
 ### Internal
 
-- ADR-10 — FinOps as architecture discipline (private; public variant in `docs/adr/` after weekend implementation).
-- ADR-04 / ADR-02 — pin the stateful baseline that drives SP sizing.
-- ADR-02 — Karpenter mode-aware scaling for stateless cost optimisation.
-- ADR-07 — NetworkPolicy reduces NAT egress cost as a security byproduct.
-- `_context/consensus.md` § 13 — cost matrix (cost-per-config trade-off table).
+- [`docs/adr/ADR-10-finops.md`](../adr/ADR-10-finops.md) — FinOps as architecture discipline.
+- [`docs/adr/ADR-04-backup-dr-and-ha.md`](../adr/ADR-04-backup-dr-and-ha.md) / [`docs/adr/ADR-02-storage-and-pv-mapping.md`](../adr/ADR-02-storage-and-pv-mapping.md) — pin the stateful baseline that drives Savings Plans sizing.
+- [`docs/adr/ADR-02-storage-and-pv-mapping.md`](../adr/ADR-02-storage-and-pv-mapping.md) — Karpenter mode-aware scaling for stateless cost optimisation.
+- [`docs/adr/ADR-07-security-and-runtime.md`](../adr/ADR-07-security-and-runtime.md) — NetworkPolicy reduces NAT egress cost as a security byproduct.
+- [`docs/operations/cost-estimate-methodology.md`](../operations/cost-estimate-methodology.md) — cost-per-config trade-off table and the per-knob formula.
 - `infrastructure/terraform/finops-*.tf` — implementation files.
 - `scripts/finops/per-tenant-cost-attribution.sql` — Athena query patterns.
 - `gitops/grafana/dashboards/finops-overview.json` — dashboard skeleton.

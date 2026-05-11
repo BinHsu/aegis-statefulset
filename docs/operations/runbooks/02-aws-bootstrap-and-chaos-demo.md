@@ -138,21 +138,19 @@ kubectl get pods -A | grep -E "(aws-load-balancer|kyverno|velero|external-secret
 # expect: each controller has 1-3 pods, all Running
 ```
 
-### Stage D — Velero storage + DLM cross-region
+### Stage D — Velero storage IAM
 
 ```bash
 terraform apply \
-  -target=aws_iam_role.velero \
-  -target=aws_dlm_lifecycle_policy.cross_region_snapshot_copy
+  -target=aws_iam_role.velero
 # expect: ~2 min
 ```
 
-**DLM `interval_unit = MINUTES` — known caveat:** AWS may return
-`InvalidParameterValue: interval_unit` if your account is in a region
-where DLM does not yet support minute-granularity schedules. Fallback:
-edit `dlm-cross-region-snapshot-copy.tf` and change `interval_unit` to
-`HOURS`, `interval` to `1`. RPO degrades to ~1h instead of ~5min;
-acceptable for the demo. Re-apply.
+Cross-region snapshot copy is handled by Velero's `snapshotMoveData: true` on
+the DR-tier `Schedule` CRD (per ADR-04 § dual-cadence pattern) — no AWS DLM
+lifecycle policy involved. The cross-region replicated BSL bucket and the
+DR-region VolumeSnapshotLocation are provisioned alongside the rest of the
+S3 + IAM in Stage E.
 
 ### Stage E — Everything else
 
@@ -259,8 +257,8 @@ kubectl get pdb,statefulset,deployment,svc,ingress -A -o yaml \
 # screenshots from Grafana go in chaos-evidence/screenshots/
 ```
 
-The `chaos-evidence/` directory is the artefact you reference in
-Runbook 05's submission email.
+The `chaos-evidence/` directory is the artefact you attach to or
+reference from any external write-up of the chaos demo.
 
 ---
 

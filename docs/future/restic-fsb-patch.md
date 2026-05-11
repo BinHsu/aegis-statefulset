@@ -5,6 +5,21 @@
 > shape favours FSB. Otherwise stay on the default.
 > **Reading order:** `docs/operations/why-velero-not-restic.md` first
 > (full reasoning), then this doc (mechanics + apply instructions).
+>
+> **Walkthrough vs applicable diff:** the walkthrough below uses
+> single-schedule terminology (`velero-schedule.yaml`) for narrative
+> clarity. The architecture currently runs a **dual-cadence pair**:
+> `helm/aegis-statefulset/templates/velero-schedule-operational.yaml`
+> (5-min, source-region only) and
+> `helm/aegis-statefulset/templates/velero-schedule-dr.yaml`
+> (4 h, cross-region). The actual applicable patch at
+> `docs/future/restic-fsb-patch/restic-fsb.patch` targets both files —
+> Schedule A stays on CSI for fast operational restore, Schedule B
+> flips to FSB for cross-cloud-portable DR-tier backup (the **hybrid
+> CSI + FSB** pattern documented in `why-velero-not-restic.md`
+> § "Industry workarounds"). Read the walkthrough for the shape of
+> the change; apply the `.patch` for the precise diff against the
+> dual-cadence files.
 
 ---
 
@@ -246,7 +261,7 @@ After applying, three architecture documents need amendment:
 
 1. **`docs/adr/ADR-04-backup-dr-and-ha.md`** — Decision §1 ("Cold DR via Velero + EBS Snapshot") needs a "transport switched to FSB" note. RTO target needs revision (~10× longer). Trade-offs accepted needs the new app-pod CPU/RAM cost.
 2. **`docs/operations/why-cold-dr.md`** — the cost-RPO curve numbers need updating to FSB scale.
-3. **`_context/STATE.md`** — header status note "Wave 4 — Cold DR via Velero adopted" should append "; transport flipped to FSB per restic-fsb-patch.md".
+3. **Architecture status tracker** — wherever the current "Cold DR via Velero" decision is recorded, append "transport flipped to FSB per restic-fsb-patch.md" so the next reader understands which schedule pair is live.
 
 Three runtime alerts need re-tuning:
 

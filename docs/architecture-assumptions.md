@@ -184,9 +184,9 @@ shaped differently (e.g., per-tenant cost ceiling)?
 2. During Stage 3, treat each assumption as a question waiting to be
    asked. If the team confirms an assumption, mark it in the meeting
    notes as "L2 → L1" (demoted from operator-decision to platform-locked).
-3. After Stage 3, update `_context/STATE.md` § 7 with the resolved set;
-   the architecture variant for each open question is in the
-   corresponding ADR.
+3. After Stage 3, mark each question's resolution in the architecture's
+   tracking system; the architecture variant for each open question is
+   in the corresponding ADR.
 
 The submission earns its bones by being explicit about what it does and
 does not know — not by claiming completeness.

@@ -74,9 +74,14 @@ make anonymisation-check  # or: bash scripts/ci/anonymisation-check.sh
 
 ## Operational Notes
 
-- The application image is currently a **placeholder** (`nginx:1.27.0`).
-  Replace with the real application image SHA before production rollout.
-- The `backup-cronjob` ships a stub command. Real implementation lives in
-  `scripts/backup/lvm-snapshot-restic.sh` (snapshots LVM, then restic to S3).
-- Standby StatefulSet is `replicas: 0` by default; activated on failover
-  by the runbook in `scripts/runbooks/failover.md`.
+- The application image is the **POC mock binary** (`aegis-stateful-mock`).
+  Replace with the real application image SHA before production rollout
+  per ADR-09 supply-chain discipline.
+- Backups are orchestrated by the Velero `Schedule` CRDs
+  (`templates/velero-schedule-operational.yaml` and
+  `templates/velero-schedule-dr.yaml`), not by per-pod CronJobs —
+  see ADR-04 dual-cadence pattern.
+- HA model is **cold DR via Velero + EBS Snapshot** — no standby
+  StatefulSet pods. AZ rotation runs via
+  `aws eks update-nodegroup-config` + Velero restore (see
+  `docs/adr/ADR-04-backup-dr-and-ha.md`).

@@ -13,11 +13,9 @@ Run order on submission day:
 | 02 | [AWS bootstrap + chaos demo](02-aws-bootstrap-and-chaos-demo.md) | ~3 h | ~$50–100 | AWS account, terraform, kubectl |
 | 03 | [GitHub Actions OIDC trust](03-github-actions-oidc.md) | ~30 min | $0 | AWS IAM admin, GitHub repo admin |
 | 04 | [Grafana Cloud setup](04-grafana-cloud-setup.md) | ~30 min | $0 (free tier) | Email |
-| 05 | [Submission email to Sebastian Weikart](05-submission-email.md) | ~10 min | — | Items 01–04 done; SUBMISSION.pdf rendered |
 
 **Recommended sequencing:** 01 → 03 → 04 in any order (they're independent
-preparation steps), then 02 (the live demo, last because it spends money),
-then 05 (after 02 produces dashboard screenshots / chaos evidence).
+preparation steps), then 02 (the live demo, last because it spends money).
 
 **Hard prerequisites — do these BEFORE anything in this folder:**
 - Repo cloned to working tree, no uncommitted Wave 4 changes

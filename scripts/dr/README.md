@@ -2,9 +2,9 @@
 
 This directory holds the three DR recovery scripts and the operator runbook
 that ties them together. The architecture decisions are in
-`_context/adr/ADR-04-cluster-recovery-three-paths.md`; this document is the
-**operational** companion: which path to pick, what to verify, what success
-looks like.
+[`docs/adr/ADR-04-backup-dr-and-ha.md`](../../docs/adr/ADR-04-backup-dr-and-ha.md);
+this document is the **operational** companion: which path to pick, what to
+verify, what success looks like.
 
 > **Before reading further:** the design principle is
 > *"infrastructure is cattle, EBS is treasure."* Cluster, deployments,
@@ -119,7 +119,7 @@ The script:
 2. Queries each pod's `/admin/local-tenants`.
 3. Compares actual placement to consistent-hash result.
 4. Writes override entries **only for divergences** — most tenants match
-   the hash and need no entry (~95% per consensus.md § 3).
+   the hash and need no entry (~95% in practice; see ADR-03 § Override delta).
 
 ### Success criteria
 
@@ -196,9 +196,7 @@ change (cluster upgrade, Karpenter rollout, IAM refactor).
 
 ## Related
 
-- `_context/adr/ADR-04-cluster-recovery-three-paths.md` — architectural reasoning
-- `_context/adr/ADR-02-pod-to-pv-mapping-discipline.md` — EBS tag conventions
-- `_context/adr/ADR-03-consistent-hash-override-delta.md` — override semantics
-- `_context/adr/ADR-04-backup-cadence-configurable.md` — backup cadence and RPO bounds
-- `_context/adr/ADR-07-secrets-management-eso.md` — Restic password sourcing
-- `_context/consensus.md` § 11 — full DR design discussion
+- [`docs/adr/ADR-04-backup-dr-and-ha.md`](../../docs/adr/ADR-04-backup-dr-and-ha.md) — architectural reasoning + the three recovery paths + backup cadence + RPO bounds (consolidated)
+- [`docs/adr/ADR-02-storage-and-pv-mapping.md`](../../docs/adr/ADR-02-storage-and-pv-mapping.md) — EBS tag conventions and the four-layer pod-to-PV mapping discipline
+- [`docs/adr/ADR-03-routing-and-ingress.md`](../../docs/adr/ADR-03-routing-and-ingress.md) — placement-table override semantics (the hash + delta pattern)
+- [`docs/adr/ADR-07-security-and-runtime.md`](../../docs/adr/ADR-07-security-and-runtime.md) — Restic / Velero credential sourcing via ESO + IRSA

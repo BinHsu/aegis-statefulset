@@ -79,7 +79,7 @@ Symptom: `argocd app diff` shows a config field changed; `managedFields.manager:
 1. Identify the engineer (audit log + chat the team).
 2. Decide: was the change legitimate (emergency fix) or accidental?
 3. **Legitimate:** back-port to git as a PR within the same on-call shift. After PR merge, run the manual sync to make git the source of truth again.
-4. **Accidental:** run `argocd app sync aegis-statefulset-prod` to revert the cluster to the git-declared state. File a follow-up ticket if the engineer needs RBAC adjustment (ArgoCD AppProject roles per `projects/aegis-statefulset.yaml`).
+4. **Accidental:** run `argocd app sync aegis-statefulset-prod` to revert the cluster to the git-declared state. File a follow-up ticket if the engineer needs RBAC adjustment (ArgoCD AppProject roles per `gitops/argocd/projects/aegis-statefulset.yaml`).
 
 ### Cause 2: Helm release outside ArgoCD
 
