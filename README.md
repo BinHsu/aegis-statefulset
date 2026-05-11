@@ -27,10 +27,12 @@ invariant across customer profiles — only `values.yaml` configuration moves.
 | Operate the platform | [Operations runbooks][ops] + [8 default dashboards][dashboards] |
 | Quick-start a deployment | [Quick start](#quick-start) below |
 | Adapt to your context | [Configuration knobs](#configuration) + [`values.yaml`][values] |
+| Plan the long-term evolution | [Future-plans hub][future] — 5-horizon roadmap, triggers, cost trajectory |
 
 [submission]: docs/SUBMISSION.md
 [overview]: docs/architecture-overview.md
 [adr-index]: docs/adr/INDEX.md
+[future]: docs/future/README.md
 [ops]: docs/operations/
 [dashboards]: gitops/grafana/dashboards/
 [values]: helm/aegis-statefulset/values.yaml
