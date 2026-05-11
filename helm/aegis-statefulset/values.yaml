@@ -54,6 +54,15 @@ stateful:
     # production default; POC override 'soft' via values-poc.yaml
     type: hard
 
+  # Startup probe budget for cold-start LevelDB MemTable rebuild (per
+  # ADR-02 § Graceful shutdown + cold-start sizing). failure_threshold ×
+  # 30s period = total cold-start window before K8s gives up and starts
+  # killing the pod. Default 60 × 30s = 30 min — POC mock returns /ready
+  # immediately so this never fires; the knob is wired for production
+  # LDB at 2 TB where SSTable forest warm-up is 5–15 min.
+  startup_probe:
+    failure_threshold: 60
+
 # ====================================================================
 # Stateless API tier (per ADR-01 routing identity, Layer 2 demo)
 # ====================================================================

@@ -147,6 +147,23 @@ spec:
               cpu: {{ .Values.stateful.resources.limits.cpu }}
               memory: {{ .Values.stateful.resources.limits.memory }}
 
+          # Startup probe — bounds the cold-start window before K8s starts
+          # killing the pod. A real LevelDB instance rebuilds the MemTable
+          # from the SSTable forest at boot; per ADR-02 that is 5–15 min
+          # at 2 TB. Without a startup probe, the liveness probe begins
+          # evaluating at initialDelaySeconds=30s and kills the pod
+          # mid-warmup. The startup probe suppresses both liveness and
+          # readiness until it succeeds.
+          # Total budget = failureThreshold × periodSeconds. Default
+          # 60 × 30s = 30 min — generous headroom for production LDB;
+          # the POC mock answers /ready immediately so this never fires.
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            periodSeconds: 30
+            failureThreshold: {{ .Values.stateful.startup_probe.failure_threshold | default 60 }}
+
           livenessProbe:
             httpGet:
               path: /healthz

@@ -50,12 +50,42 @@ spec:
           labelSelector:
             matchLabels:
               app.kubernetes.io/component: stateful-data
+          # ──────────────────────────────────────────────────────────
+          # APPLICATION CONSISTENCY HOOK — REPLACE FOR PRODUCTION LDB.
+          # ──────────────────────────────────────────────────────────
+          # POC mock: `sync && echo` is a no-op acknowledgement of the
+          # hook surface — the mock has no MemTable, no WAL, no file
+          # lock to flush, so the `sync` is purely for filesystem
+          # metadata coherence.
+          #
+          # Production: replace the command with the application's
+          # admin quiesce endpoint, which must perform in order:
+          #   1. Stop accepting writes (set read-only flag or grab
+          #      the WAL mutex).
+          #   2. Flush MemTable → SSTable (LevelDB: implicit flush on
+          #      DB::Close-equivalent path, or an explicit
+          #      CompactRange; RocksDB: db->Flush(opts)).
+          #   3. fsync the WAL file + data directory.
+          #   4. Return 200 OK to acknowledge quiesce ready.
+          # The post-hook then releases the read-only flag / drops the
+          # mutex.
+          #
+          # The DR-tier cadence is looser than operational (4h vs 5min)
+          # so the per-backup quiesce window is less frequent, but the
+          # consistency requirement is identical — a corrupt DR snapshot
+          # only surfaces during region-failure recovery, the worst
+          # possible time to discover it.
+          # ──────────────────────────────────────────────────────────
           pre:
             - exec:
                 container: app
                 command: ["/bin/sh", "-c", "sync && echo 'pre-backup quiesce'"]
                 onError: Fail
                 timeout: 10s
+          # Post-hook releases the consistency mode set by the pre-hook.
+          # POC mock: no-op `echo`. Production: hit the admin endpoint
+          # again to drop the read-only flag / release the WAL mutex so
+          # the application resumes writes.
           post:
             - exec:
                 container: app
