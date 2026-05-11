@@ -194,34 +194,45 @@ curl       "http://${ALB_HOST}/data?key=foo" -H 'X-Tenant: t1'
 ## 4. Phase 1 chaos — master AZ failure
 
 Goal: kill the master AZ subnet, watch detection fire, run rotation
-script, watch recovery. Capture screenshots from Grafana
-service-availability dashboard.
+script, watch recovery. Capture evidence at three checkpoints — the
+`capture-evidence.sh` helper snapshots K8s + Velero + AWS state into
+a timestamped directory at each call so the DR report can reference
+exact evidence per checkpoint.
 
 ```bash
 # Pre-demo: open Grafana service-availability dashboard, start screen
 # recording, note baseline probe_success = 1.0
 
+# Checkpoint 1 of 3 — T+0 baseline
+./scripts/chaos/capture-evidence.sh baseline
+
+# Inject the failure (drains node group + deletes subnet)
 ./scripts/chaos/run-phase-1-az-failure.sh
-# this script:
 #   1. records start time
-#   2. detaches the master AZ subnet route table (simulates AZ partition)
-#   3. waits for Prometheus alert + ALB health check + Blackbox probe to fire
-#   4. prompts you to run scripts/dr/az-rotation.sh
-#   5. measures rotation duration to recovery
+#   2. drains the master AZ stateful node group (desired=0)
+#   3. waits for instances + ENIs to clear
+#   4. deletes the master AZ subnet (the actual blast)
+
+# Checkpoint 2 of 3 — T+~2 min, subnet deleted
+./scripts/chaos/capture-evidence.sh phase-1-subnet-deleted
+
+# Drive recovery (rotation to standby AZ + Velero restore)
+./scripts/dr/az-rotation.sh \
+  SOURCE_AZ=eu-central-1a \
+  TARGET_AZ=eu-central-1b
+
+# Checkpoint 3 of 3 — T+~25 min, recovery complete in new master AZ
+./scripts/chaos/capture-evidence.sh phase-1-recovery
 ```
 
-**Three checkpoints — capture screenshot at each:**
+**Three Grafana screenshots — capture at each checkpoint** and save into the matching `chaos-evidence/<timestamp>-<label>/` directory as `screenshot-service-availability.png`:
 
-1. **T+0:** baseline traffic, probe_success = 1.0
-2. **T+~2 min:** subnet detached, probe_success = 0, alerts firing
-3. **T+~25 min:** rotation done, probe_success back to 1.0 (in AZ-B)
+1. **baseline:** probe_success = 1.0, all pods Running
+2. **phase-1-subnet-deleted:** probe_success = 0, alerts firing
+3. **phase-1-recovery:** probe_success back to 1.0 (now serving from AZ-B)
 
-**Re-attach + cleanup after Phase 1:**
-
-```bash
-./scripts/chaos/run-phase-1-az-failure.sh --restore
-# re-attaches the route table; system stays in AZ-B as new master per ADR-04
-```
+The `capture-evidence.sh` README inside each checkpoint directory explains
+what fields go where in the DR report's Phase 1 section.
 
 ---
 
@@ -231,34 +242,65 @@ Goal: simulate primary region loss, drive Layer-3 DR (Route 53 weighted
 flip + Velero restore in eu-west-1).
 
 ```bash
+# Checkpoint 4 of 5 — pre-Phase-2 baseline (post-Phase-1 state)
+./scripts/chaos/capture-evidence.sh phase-2-baseline
+
+# Inject the region failure (Route 53 flip + DR-region Velero restore)
 ./scripts/chaos/run-phase-2-region-drill.sh
-# this script:
 #   1. shifts Route 53 weighted record from primary to DR (100/0 -> 0/100)
 #   2. triggers velero restore in eu-west-1 from latest cross-region snapshot
 #   3. measures end-to-end RTO from cutover to first 200 OK
+
+# Checkpoint 5 of 5 — Phase 2 recovery complete
+./scripts/chaos/capture-evidence.sh phase-2-recovery
 ```
 
-**Expected:** ~50 min end-to-end RTO. Capture:
-- Route 53 weighted-record change confirmation
-- Velero restore log
-- First successful curl against DR ALB
+**Expected:** ~50 min end-to-end RTO. The `phase-2-recovery` checkpoint
+captures the DR-region cluster state — verify the resorted pods are in
+`eu-west-1` AZs in `k8s-nodes.txt`.
 
 ---
 
-## 6. Capture evidence
+## 6. Capture cost + assemble DR report
+
+After teardown completes (see § 7), pull AWS Cost Explorer for the
+demo window and assemble the DR report. **Cost Explorer lags ~24 h**
+on the current day — for a same-day demo, the cost numbers are
+partial; re-run the cost capture the next day for final totals.
 
 ```bash
-mkdir -p chaos-evidence
-kubectl get events --all-namespaces \
-  --sort-by='.lastTimestamp' > chaos-evidence/k8s-events.txt
-helm get values aegis-app -n aegis-app > chaos-evidence/values-rendered.yaml
-kubectl get pdb,statefulset,deployment,svc,ingress -A -o yaml \
-  > chaos-evidence/cluster-snapshot.yaml
-# screenshots from Grafana go in chaos-evidence/screenshots/
+# Cost capture — tagged Project=aegis-statefulset, broken down by service
+./scripts/finops/capture-demo-cost.sh
+# outputs:
+#   chaos-evidence/cost-summary.json (raw Cost Explorer response)
+#   chaos-evidence/cost-summary.md   (line-by-line markdown table)
+
+# Hand-fill the operator-specific sections of the DR report:
+#   - timing values from capture-evidence/ checkpoint README files
+#   - data-integrity verification results
+#   - lessons-learned narrative
+#   - production-readiness verdict
+#
+# The template documents which evidence file feeds which placeholder.
+$EDITOR chaos-evidence/DR_report.md   # generated by the script below
+
+# Assemble the PDF (auto-fills date/region/git-sha/cost-table; the
+# operator-fillable bits are marked [fill in] for you to complete
+# in the markdown before re-running this step)
+./scripts/dr-report/generate-dr-report.sh
+# outputs:
+#   chaos-evidence/DR_report.md  (filled-in markdown ready for hand-edit)
+#   docs/DR_report.pdf           (rendered PDF, ship-ready)
 ```
 
-The `chaos-evidence/` directory is the artefact you attach to or
-reference from any external write-up of the chaos demo.
+The DR report template is at [`docs/operations/dr-report-template.md`](../dr-report-template.md). It enumerates which evidence file feeds which placeholder, so the hand-fill step is a mechanical walk through the template.
+
+After the demo, the artefacts you reference from any external write-up are:
+
+- `chaos-evidence/<timestamp>-<label>/` — five checkpoint directories with K8s + Velero + AWS state
+- `chaos-evidence/cost-summary.{json,md}` — actual spend
+- `chaos-evidence/DR_report.md` — filled-in markdown
+- `docs/DR_report.pdf` — the rendered report
 
 ---
 
