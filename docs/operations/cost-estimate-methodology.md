@@ -1,5 +1,16 @@
 # Cost & time estimate methodology
 
+> **Audit-traceability framing.** This doc is the methodology + citation
+> source for every quantitative claim in the submission's cost & time
+> discussions. The primary client value is **auditor-readiness** — cost
+> figures with formulas + AWS pricing URLs cited per line are
+> audit-defensible (ISO 27001 A.5.30 ICT readiness for business continuity,
+> SOC 2 CC3.4 risk identification with quantified impact). Cost figures
+> without traceable sources are audit findings. The methodology
+> discipline doubles as hallucination-defense for AI-assisted cost
+> estimation, but the primary justification is auditor-readiness, not
+> AI-correctness. Companion: [`docs/adr/ADR-10-finops.md`](../adr/ADR-10-finops.md) (the architectural decision).
+>
 > Every quantitative claim in the submission's cost & time discussions
 > traces back to a formula in this doc, with AWS / vendor pricing URLs
 > cited. Numbers in submission docs are rendered as approximations

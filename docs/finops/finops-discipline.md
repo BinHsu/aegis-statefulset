@@ -1,5 +1,15 @@
 # FinOps Discipline — Senior Architect Runbook
 
+> **Audit-traceability framing.** The FinOps practice documented here is
+> the operational layer of the same auditor-readiness discipline framed
+> in [`docs/adr/ADR-10-finops.md`](../adr/ADR-10-finops.md) and grounded
+> in [`docs/operations/cost-estimate-methodology.md`](../operations/cost-estimate-methodology.md).
+> Tagging discipline + cost-allocation reports + anomaly detection are
+> not "nice to have" — they are the **audit-defensible answer** to
+> "what did this platform cost, who consumed it, when, and how do we
+> reconcile the bill against the deployed inventory?" (ISO 27001 A.5.30,
+> SOC 2 CC3.4). The five disciplines below operationalise that posture.
+
 **Scope:** the FinOps practice for `aegis-statefulset`. Companion to ADR-10.
 **Audience:** platform engineers, SRE on-call, finance partner, product manager.
 **Status:** Crawl phase (per FinOps Foundation Crawl/Walk/Run maturity model).
