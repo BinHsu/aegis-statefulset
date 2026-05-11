@@ -56,7 +56,7 @@ argocd app get aegis-statefulset-prod --show-params --refresh
 
 # 4. Cross-reference the K8s audit log for who/what mutated the resource.
 #    Audit log lookup is per-cluster — see `docs/runbooks/audit-log-query.md`
-#    (out of POC; runbook stub).
+#    `[TODO]` (out of POC; runbook to be written).
 kubectl logs -n kube-system --tail=200 -l component=audit | \
   grep '<resource-name>' | jq .
 

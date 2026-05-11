@@ -299,7 +299,7 @@ configurations.
    but the action is in the app's runtime config.
 
 **Industry reference points:** Facebook RocksDB tuning guide; LevelDB
-documentation `doc/impl.md` § "Compaction"; this is an operational
+[upstream `doc/impl.md`](https://github.com/google/leveldb/blob/main/doc/impl.md) § "Compaction"; this is an operational
 concern documented since LevelDB's 2011 release. Most production K-V
 deployments expose compaction-tuning as runtime config.
 
