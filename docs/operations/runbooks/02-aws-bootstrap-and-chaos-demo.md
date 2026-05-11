@@ -324,31 +324,93 @@ After the demo, the artefacts you reference from any external write-up are:
 
 ---
 
-## 7. Teardown — IMPORTANT
+## 7. Teardown — bounded, audited, mis-deletion-proof
 
-EKS clusters are billed by the hour. After demo:
+EKS clusters are billed by the hour. After demo, run the comprehensive
+teardown script which goes BEYOND `helm uninstall + terraform destroy`
+to also clean the orphans `terraform destroy` doesn't catch:
+reclaimPolicy=Retain PVCs/PVs, cross-region EBS snapshot copies, S3
+versioned objects, KMS-key 7-day window awareness.
+
+### Four-layer safety against mis-deletion
+
+The script will refuse to run if any layer fails:
+
+1. **AWS account ID match** — `AWS_ACCOUNT_ID` env var must match the
+   caller's actual AWS account (`aws sts get-caller-identity`).
+2. **Cluster name EXACT match** — `CLUSTER_NAME` env var; no fuzzy
+   "contains aegis" pattern is used anywhere.
+3. **Double-tag intersection** — every resource delete requires BOTH
+   `Project=aegis-statefulset` AND `ManagedBy=terraform` tags.
+   Terraform `default_tags` guarantees both; manual / coworker
+   resources without both tags are structurally invisible to the script.
+   Discovery uses AWS Resource Groups Tagging API which returns the
+   AND-intersection natively.
+4. **Expected-count gate** — `FORCE=1` mode also requires
+   `CONFIRM_DELETE_COUNT=<N>` where `N` is the count the operator
+   observed in a previous dry-run. Drift between dry-run and force-run
+   is caught.
+
+### Step-by-step
 
 ```bash
-helm uninstall aegis-app -n aegis-app
-# wait for finalizers to release PVCs (Velero finalizer can stick — kubectl patch if so)
-kubectl get pvc -n aegis-app
-kubectl get pv
+# Step 1 — dry-run to observe the count
+CLUSTER_NAME=aegis-statefulset-prod \
+AWS_ACCOUNT_ID=123456789012 \
+  ./scripts/teardown/full-teardown.sh
 
-terraform destroy
-# expect: ~15 min; some resources (KMS keys with deletion window) take longer
+# Read the discovered count from the output, e.g.:
+#   Discovered: 32 resources in eu-central-1, 8 in eu-west-1
+#   Total tag-matched resources: 40
+
+# Step 2 — execute, passing the observed count
+CLUSTER_NAME=aegis-statefulset-prod \
+AWS_ACCOUNT_ID=123456789012 \
+CONFIRM_DELETE_COUNT=40 \
+FORCE=1 \
+  ./scripts/teardown/full-teardown.sh
+
+# Step 3 — independent audit (script runs this internally, but
+# can be re-run standalone)
+CLUSTER_NAME=aegis-statefulset-prod \
+AWS_ACCOUNT_ID=123456789012 \
+  ./scripts/teardown/verify-clean.sh
+# Exit 0 = clean; exit 1 = orphans found (see report)
 ```
 
-**Verify nothing orphaned:**
+### CI alternative (GitHub Actions)
 
-```bash
-aws eks list-clusters --region eu-central-1
-aws ec2 describe-volumes --filters "Name=tag:Project,Values=aegis-statefulset" \
-  --query 'Volumes[].VolumeId'
-aws s3 ls | grep aegis    # the velero buckets may take a day for lifecycle to clear
-```
+A `workflow_dispatch` GHA workflow at `.github/workflows/teardown.yml`
+wraps the same script with OIDC-scoped IAM. Use it when you want the
+teardown audit-logged through GitHub instead of a laptop.
 
-KMS keys go into the 7-day deletion window. They continue to incur $1/month
-each until that closes — non-zero but bounded.
+Inputs include the same confirmation string + `confirm_delete_count`,
+so the same safety properties apply.
+
+### Output artefacts
+
+Each invocation writes:
+
+- `chaos-evidence/teardown-<timestamp>/teardown-report.txt` — full log
+- `chaos-evidence/teardown-<timestamp>/delete-manifest.json` — JSON
+  inventory of every resource matching both tags, grouped by region
+- `chaos-evidence/teardown-<timestamp>/discovery-<region>.json` — raw
+  AWS Resource Groups Tagging API response per region
+- `chaos-evidence/teardown-verify-<timestamp>/verify-clean.json` —
+  post-teardown audit
+
+These artefacts are the audit trail proving the teardown was
+both complete (no orphans) and bounded (only resources matching
+both tags were touched). Useful evidence for the DR report's
+"production-readiness verdict" section.
+
+### Post-teardown known costs (not bypassable)
+
+| Cost | Why | Workaround |
+|---|---|---|
+| KMS keys in 7-day deletion window | AWS-enforced; cannot be reduced below 7 days | None — bounded at ~$1/key/month × keys × 7 days = bounded final spend |
+| S3 bucket lifecycle propagation | Can take up to 24 h | Re-run verify-clean tomorrow if anything lingers |
+| Cost Explorer attribution lag | AWS Billing data refreshes ~24 h late | Re-run `scripts/finops/capture-demo-cost.sh` tomorrow with same window for final reconciliation |
 
 ---
 

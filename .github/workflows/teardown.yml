@@ -1,0 +1,202 @@
+# .github/workflows/teardown.yml
+#
+# Manual-dispatch GHA workflow that wraps scripts/teardown/full-teardown.sh
+# with extra guardrails for CI execution. The script can also be run from a
+# laptop with the operator's AWS credentials — this workflow is the
+# CI-equivalent for teams that prefer to keep destructive operations
+# audited through GitHub Actions OIDC + workflow logs.
+#
+# Guardrails:
+#   - workflow_dispatch only — never auto-triggers
+#   - Requires the operator to type a confirmation string matching the
+#     repo name (so a misclick on an unrelated repo can't trigger it)
+#   - Uses GHA → AWS OIDC (no long-lived secrets); the IAM role must
+#     have the teardown-permissions scope (see ADR-07)
+#   - Records the full teardown report as a workflow artifact for audit
+#   - Runs verify-clean post-teardown; fails the job if orphans remain
+#
+# Suggested IAM scope for the teardown role (separate from the deploy
+# role per ADR-07's least-privilege principle):
+#   - ec2:Describe*, ec2:DeleteVolume, ec2:DeleteSnapshot
+#   - eks:DescribeCluster, eks:DeleteCluster, eks:ListClusters
+#   - iam:DeleteRole, iam:DetachRolePolicy, iam:ListRoles, iam:DeleteRolePolicy
+#   - kms:DescribeKey, kms:ListKeys, kms:ScheduleKeyDeletion
+#   - s3:DeleteBucket, s3:DeleteObject, s3:DeleteObjectVersion, s3:ListBucket*
+#   - logs:DescribeLogGroups, logs:DeleteLogGroup
+#   - route53:ListHostedZones, route53:DeleteHostedZone
+#   - sts:GetCallerIdentity
+#   Plus the terraform-state bucket + lock-table permissions for
+#   `terraform destroy` to clean state on success.
+
+name: Teardown (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type "DELETE-aegis-statefulset" to confirm destructive teardown'
+        required: true
+        type: string
+      confirm_delete_count:
+        description: 'Expected resource count (from a previous dry-run). Safety gate 4 — script aborts if discovered count != this value.'
+        required: true
+        type: string
+      cluster_name:
+        description: 'EKS cluster name (EXACT match, no fuzzy patterns)'
+        required: true
+        type: string
+        default: 'aegis-statefulset-prod'
+      skip_terraform:
+        description: 'Skip terraform destroy (run manually afterwards)?'
+        required: false
+        default: false
+        type: boolean
+      aws_region:
+        description: 'Source AWS region'
+        required: false
+        type: string
+        default: 'eu-central-1'
+      dr_region:
+        description: 'DR AWS region'
+        required: false
+        type: string
+        default: 'eu-west-1'
+
+# Block all other jobs from triggering simultaneously (no concurrent teardowns)
+concurrency:
+  group: teardown-${{ github.repository }}
+  cancel-in-progress: false
+
+# Use OIDC (no long-lived secrets); IAM role assumption only
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+  AWS_ROLE_ARN: ${{ vars.AWS_TEARDOWN_ROLE_ARN }}
+  PROJECT_TAG_KEY: 'Project'
+  PROJECT_TAG_VAL: 'aegis-statefulset'
+
+jobs:
+  teardown:
+    name: Full teardown via scripts/teardown/full-teardown.sh
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # ─── Guardrail 1: confirmation string ──────────────────────────
+      - name: Validate confirmation input
+        run: |
+          if [ "${{ inputs.confirmation }}" != "DELETE-aegis-statefulset" ]; then
+            echo "ERROR: confirmation string mismatch."
+            echo "       Got:      ${{ inputs.confirmation }}"
+            echo "       Expected: DELETE-aegis-statefulset"
+            echo ""
+            echo "This is the guardrail that prevents accidental teardown via misclick."
+            exit 1
+          fi
+          echo "✓ Confirmation string matches — proceeding."
+
+      - uses: actions/checkout@v4
+
+      # ─── Tooling ────────────────────────────────────────────────────
+      - name: Install kubectl + helm + jq
+        run: |
+          curl -fsSL https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl -o /tmp/kubectl
+          install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+          curl -fsSL https://get.helm.sh/helm-v3.14.3-linux-amd64.tar.gz | tar -xz -C /tmp
+          install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
+          sudo apt-get install -y jq
+          aws --version
+          kubectl version --client=true
+          helm version
+          jq --version
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.7.0'
+
+      # ─── AWS OIDC assume role ──────────────────────────────────────
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Verify AWS identity
+        run: |
+          ACTUAL=$(aws sts get-caller-identity --query 'Account' --output text)
+          echo "Caller account: ${ACTUAL}"
+          echo "Expected:       ${{ env.AWS_ACCOUNT_ID }}"
+          if [ "${ACTUAL}" != "${{ env.AWS_ACCOUNT_ID }}" ]; then
+            echo "ERROR: AWS account mismatch (the script will also check this)."
+            exit 1
+          fi
+
+      # ─── kubeconfig for the target cluster ─────────────────────────
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name "${{ inputs.cluster_name }}" \
+            --region "${{ inputs.aws_region }}"
+
+      # ─── Run the teardown script with FORCE=1 ──────────────────────
+      # Safety layer 4: CONFIRM_DELETE_COUNT must match the dry-run count
+      # observed by the operator. The script aborts if discovered count
+      # differs — caught drift, no nuking.
+      - name: Execute full-teardown
+        env:
+          CLUSTER_NAME: ${{ inputs.cluster_name }}
+          AWS_REGION: ${{ inputs.aws_region }}
+          DR_REGION: ${{ inputs.dr_region }}
+          AWS_ACCOUNT_ID: ${{ env.AWS_ACCOUNT_ID }}
+          PROJECT_TAG_KEY: ${{ env.PROJECT_TAG_KEY }}
+          PROJECT_TAG_VAL: ${{ env.PROJECT_TAG_VAL }}
+          FORCE: '1'
+          CONFIRM_DELETE_COUNT: ${{ inputs.confirm_delete_count }}
+          SKIP_TF: ${{ inputs.skip_terraform == 'true' && '1' || '' }}
+          OUTPUT_ROOT: 'teardown-artifacts'
+        run: |
+          chmod +x scripts/teardown/full-teardown.sh scripts/teardown/verify-clean.sh
+          ./scripts/teardown/full-teardown.sh
+
+      # ─── Upload teardown report as audit artifact ──────────────────
+      - name: Upload teardown report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: teardown-report-${{ github.run_id }}
+          path: teardown-artifacts/
+          retention-days: 90
+
+      # ─── Final verify-clean (script also runs this internally) ─────
+      - name: Final verify-clean (re-run for explicit job status)
+        if: success()
+        env:
+          CLUSTER_NAME: ${{ inputs.cluster_name }}
+          AWS_REGION: ${{ inputs.aws_region }}
+          DR_REGION: ${{ inputs.dr_region }}
+          AWS_ACCOUNT_ID: ${{ env.AWS_ACCOUNT_ID }}
+          OUTPUT_ROOT: 'teardown-artifacts'
+        run: |
+          ./scripts/teardown/verify-clean.sh
+
+      # ─── Summary into job log ──────────────────────────────────────
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "# Teardown summary"
+            echo ""
+            echo "**Confirmation:** ✓ matched"
+            echo "**Cluster:** \`${{ inputs.cluster_name }}\`"
+            echo "**Source region:** \`${{ inputs.aws_region }}\`"
+            echo "**DR region:** \`${{ inputs.dr_region }}\`"
+            echo "**Skip terraform:** \`${{ inputs.skip_terraform }}\`"
+            echo ""
+            echo "## Post-teardown costs (not bypassable)"
+            echo ""
+            echo "- KMS keys are in 7-day deletion window @ \$1/key/month until window closes"
+            echo "- Cost Explorer attribution lags 24h; verify final reconciliation tomorrow"
+            echo ""
+            echo "Full teardown report: see workflow artifacts (90-day retention)."
+          } >> "${GITHUB_STEP_SUMMARY}"
