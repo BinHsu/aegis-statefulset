@@ -126,10 +126,12 @@ fi
 # Step 5 — helm install at discovered replica count.
 log "[5/6] helm install/upgrade at discovered replica count"
 total_count=$(echo "${volumes_json}" | jq '.Volumes | length')
-# TODO: helm upgrade --install aegis-statefulset helm/aegis-statefulset \
-#         --namespace "${NAMESPACE}" --create-namespace \
-#         --set "stateful.primary.replicas=${total_count}" \
-#         --wait --timeout 30m
+log "  Discovered ${total_count} EBS volume(s) — operator should run helm upgrade with stateful.primary.replicas=${total_count}"
+# Intentionally not auto-executed; operator decision per Path A runbook:
+# helm upgrade --install aegis-statefulset helm/aegis-statefulset \
+#   --namespace "${NAMESPACE}" --create-namespace \
+#   --set "stateful.primary.replicas=${total_count}" \
+#   --wait --timeout 30m
 
 # Step 6 — rebuild routing override (delegate to Path B helper).
 log "[6/6] Rebuild routing override via warm-routing-table.sh"

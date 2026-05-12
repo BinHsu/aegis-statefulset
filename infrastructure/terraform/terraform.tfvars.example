@@ -1,0 +1,126 @@
+# =============================================================
+# terraform.tfvars.example — copy to terraform.tfvars and adjust
+# =============================================================
+#
+# This file documents every variable the root terraform module accepts,
+# with the POC defaults inlined as comments and example overrides for
+# common scenarios. Variables not listed here use the defaults defined
+# in variables.tf and grafana-cloud.tf.
+#
+# Usage:
+#   cp terraform.tfvars.example terraform.tfvars
+#   # Edit terraform.tfvars to match your environment
+#   terraform init && terraform plan -out=tfplan && terraform apply tfplan
+#
+# Note: terraform.tfvars is gitignored (per .gitignore "Terraform" section).
+# This .example file IS committed so cold-start operators see the schema.
+#
+# Cross-reference: docs/operations/runbooks/02-aws-bootstrap-and-chaos-demo.md
+# spells out which values to adjust for the chaos demo POC run.
+
+# ====================================================================
+# Region + environment
+# ====================================================================
+
+aws_region  = "eu-central-1"    # POC default; production cluster region
+dr_region   = "eu-west-1"       # Cross-region DR backup target per ADR-04
+environment = "prod"            # one of: dev | staging | prod (validated)
+
+# Number of AZs to use; matches helm values.cells.per_az_count
+az_count = 3
+
+# ====================================================================
+# Networking + cluster
+# ====================================================================
+
+vpc_cidr           = "10.0.0.0/16"
+kubernetes_version = "1.29"
+domain_name        = "aegis.example.com"    # ALB + Route 53 record root
+
+# ====================================================================
+# Stateful tier sizing (per ADR-02)
+# ====================================================================
+
+stateful_node_instance_types = ["r6id.2xlarge"]
+stateful_pool_per_az_size    = 3
+
+# Master AZ for stateful + stateless workloads
+# Single-AZ master pattern per ADR-04 / ADR-01
+master_az = "eu-central-1a"
+
+# ====================================================================
+# Stateless tier sizing
+# ====================================================================
+
+stateless_node_instance_types = ["t3.medium"]
+stateless_pool_size           = 3
+
+# ====================================================================
+# Route 53 weighted DR cutover (per ADR-04)
+# ====================================================================
+
+# Set primary=100, dr=0 for steady state
+# Set primary=0,   dr=100 to cut over to DR region
+primary_traffic_weight = 100
+dr_traffic_weight      = 0
+
+# DR-region ALB DNS + zone id — populated from DR-region module output
+# Leave empty during initial bootstrap; fill in once DR region is up
+dr_region_alb_dns     = ""
+dr_region_alb_zone_id = ""
+
+# ====================================================================
+# GitOps
+# ====================================================================
+
+enable_argocd = true    # set false to manage ArgoCD out-of-band
+
+# ====================================================================
+# FinOps (per ADR-10)
+# ====================================================================
+
+cost_center  = "aegis-statefulset-platform"
+owner_email  = "platform-team@example.com"
+
+# Budget ceilings (USD)
+monthly_budget_usd          = 10000
+monthly_budget_stateful_usd = 7000
+
+# Email recipients for FinOps alerts (Budgets + Cost Anomaly Detector)
+# Empty list = SNS topic created but no subscribers
+finops_alert_emails = [
+  # "alerts@example.com",
+  # "oncall@example.com",
+]
+
+# ====================================================================
+# Observability — Grafana Cloud (per ADR-06)
+# ====================================================================
+
+# Grafana Cloud access policy token — created via Grafana Cloud UI
+# Reference: docs/operations/runbooks/04-grafana-cloud-setup.md
+# DO NOT commit a real token. Use one of:
+#   (a) TF_VAR_grafana_cloud_token environment variable
+#   (b) terraform.tfvars (gitignored, but verify never staged)
+#   (c) AWS Secrets Manager + data source (recommended for prod)
+grafana_cloud_token = "PASTE_OR_USE_TF_VAR_grafana_cloud_token_ENV"
+
+# ====================================================================
+# Quick-edit examples for common scenarios
+# ====================================================================
+#
+# Scenario A — POC chaos demo run (one-day spend):
+#   environment                 = "staging"
+#   monthly_budget_usd          = 500
+#   monthly_budget_stateful_usd = 350
+#   finops_alert_emails         = ["your-email@example.com"]
+#
+# Scenario B — DR cutover drill (cut all traffic to eu-west-1):
+#   primary_traffic_weight = 0
+#   dr_traffic_weight      = 100
+#   dr_region_alb_dns      = "aegis-dr.eu-west-1.elb.amazonaws.com"
+#   dr_region_alb_zone_id  = "Z1ABCDEFGH123"
+#
+# Scenario C — Cell-scale-out from 1 → 3 cells (production growth):
+#   stateful_pool_per_az_size = 9    # 3 cells × 3 AZ-worth = 9 per AZ
+#   monthly_budget_stateful_usd = 21000   # ~$7K × 3 cells
