@@ -182,6 +182,7 @@ Each doc is one evolution path with its own depth + trade-off analysis + migrati
 | [`restic-fsb-patch.md`](restic-fsb-patch.md) | **Tactical** — same architecture, different backup transport (Velero CSI → FSB / Kopia / Restic) | Customer's RTO tolerance ≥ 12 h OR granular per-tenant file restore becomes product feature OR air-gap requirement |
 | [`lvm-init-patch.md`](lvm-init-patch.md) | **Tactical** — same architecture, literal-LVM storage stack (Path γ multi-PVC → Path α LVM init container) | Existing legacy on-prem LevelDB host runs LVM and migration target should match mental model OR customer policy mandates literal Linux storage stack OR in-host thin snapshot independent of CSI is required |
 | [`tikv-upgrade-path.md`](tikv-upgrade-path.md) | **Strategic** — substrate change (LevelDB → TiKV distributed K-V) | RTO ~25 min AZ failure not acceptable OR sub-5-min RPO required OR multi-region active-active becomes product requirement |
+| [`tikv-upgrade-path/migration-runbook.md`](tikv-upgrade-path/migration-runbook.md) | **Operational** — phase-by-phase playbook for the LevelDB → TiKV cutover (companion to the strategic doc above) | After Stage 3 confirms the trigger fired AND customer committed to weeks of app engineering |
 
 More docs land here as the architecture evolves. Each starts as a `[planning]` doc, gets reviewed, then either ships or stays as reading material until its trigger fires.
 
