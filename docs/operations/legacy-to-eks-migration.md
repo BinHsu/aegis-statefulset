@@ -17,20 +17,18 @@
 
 The spec asks: *"migrate live production servers to Kubernetes with
 minimal impact on daily operations."* Three things it does NOT pin
-down — each producing a different right answer:
+down — each producing a different right answer.
 
-1. **WHERE legacy lives** — EC2 / on-prem / other cloud / ECS / different
-   K8s cluster (§ 1 enumerates five shapes; transfer time differs ~10×).
-2. **HOW the app wraps LDB** — clean storage abstraction vs LDB calls
-   scattered through business logic (gates § 2 dual-write strategy).
-3. **WHAT "minimal impact" means** — zero data loss during planned
-   migration vs spending some of the 6 h RPO budget (gates § 2 strategy
-   choice).
+| Unknown | What it determines | Gates which section | Possible answers |
+|---|---|---|---|
+| **WHERE legacy lives** | Source platform mechanisms + transfer time | § 1 source matrix | EC2 / ECS / on-prem / other cloud / different K8s cluster (transfer time differs ~10× across them) |
+| **HOW the app wraps LDB** | Whether dual-write is feasible at all | § 2 dual-write strategy | Centralized storage abstraction (1–2 weeks effort) vs LDB calls scattered through business logic (weeks–month refactor) |
+| **WHAT "minimal impact" means** | RPO budget treatment + acceptable downtime | § 2 strategy choice + § 3 timing | Zero data loss (forces dual-write or MGN) vs spend RPO budget (cold cutover OK) vs maintenance window (any pattern fine) |
 
-Stage 3 conversation should pick one answer to each before any work
-starts. This document assumes the customer treats 6 h RPO as a budget
-that CAN be spent on planned migration; tighter modes in § 2 cost weeks
-of refactor in exchange.
+Stage 3 conversation should pick one answer in each row before any
+work starts. This document defaults to the customer treating 6 h RPO
+as a budget that CAN be spent on planned migration; tighter modes in
+§ 2 cost weeks of refactor in exchange.
 
 ---
 
@@ -49,11 +47,11 @@ Pick the row that matches legacy.
 
 ### Stage 3 question — confirm before any work
 
-- Which row matches legacy?
-- Is the 6 h RPO ceiling spendable on migration, or strictly reserved for disasters?
-- Is there a customer-accepted maintenance window, or must migration be fully transparent?
-
-The answers determine § 2 strategy choice and § 3 timing.
+| Question | Why it matters | Downstream effect |
+|---|---|---|
+| Which row above matches legacy? | Picks the mechanism + transfer time + RPO budget consumed | Determines § 2 strategy options |
+| Is the 6 h RPO ceiling spendable on migration, or strictly reserved for disasters? | If reserved → dual-write or MGN required; if spendable → cold cutover OK | § 2 strategy + § 3 timing |
+| Is there a customer-accepted maintenance window, or must migration be fully transparent? | Maintenance window relaxes downtime constraints; transparent demands continuous sync | § 4 cutover pacing |
 
 ---
 
@@ -298,11 +296,13 @@ needs; otherwise the default in the first table is correct.
 
 ## § 6 — Cross-references
 
-- ADR-04 — backup / DR / Three-Layer-DR (the steady-state the customer lands on)
-- ADR-05 — Strangler-Fig migration decision (this doc is the operational playbook for that decision)
-- `docs/operations/per-tenant-relocation.md` — Pattern 1 vs Pattern 2 four-tier framework (gates whether per-tenant cutover is even possible)
-- `docs/operations/runbooks/02-aws-bootstrap-and-chaos-demo.md` — EKS-side bring-up runbook
-- `docs/future/README.md` — what happens beyond steady state (T+1y onward; substrate upgrade triggers at T+3y)
+| Document | Relationship to this playbook |
+|---|---|
+| [ADR-04](../adr/ADR-04-backup-dr-and-ha.md) | Backup / DR / Three-Layer-DR — the steady-state architecture the customer lands on after migration |
+| [ADR-05](../adr/ADR-05-migration-strangler-fig.md) | Strangler-Fig migration decision — this playbook is the operational mechanics for that ADR |
+| [`per-tenant-relocation.md`](per-tenant-relocation.md) | Pattern 1 (shared LDB per pod) vs Pattern 2 (one LDB per tenant) — four-tier framework that gates whether per-tenant cutover is even possible |
+| [`runbooks/02-aws-bootstrap-and-chaos-demo.md`](runbooks/02-aws-bootstrap-and-chaos-demo.md) | EKS-side bring-up runbook — what to run before § 3 of this playbook |
+| [`docs/future/README.md`](../future/README.md) | What happens beyond steady state — T+1y onward, substrate-upgrade triggers at T+3y |
 
 ---
 
@@ -338,28 +338,28 @@ needs; otherwise the default in the first table is correct.
 
 [^3]: **Why "WAL log-shipping" is not a real option.** A reader might
     propose "monitor legacy's LevelDB WAL/LOG file and replay into the
-    destination LDB". This sounds elegant but does not work in practice:
-    LevelDB's WAL (LOG file) is a per-process crash-recovery artifact;
-    there is no public API to "subscribe to writes since LSN N" or
-    "replay this WAL on a different instance". The WAL format is
-    internal — version-dependent, with no stability contract. Parsing
-    WAL bytes directly creates a fragile fork that breaks on LDB
-    upgrades. The only ways to add streaming output are: (a) patch LDB
-    source to add a hook — maintain a fork forever, or (b) wrap LDB at
-    the app layer — effectively dual-write. So there is no "free"
-    continuous-sync mechanism for LevelDB; the four strategies in the
-    § 2 table are the real options.
+    destination LDB". Three reasons it does not work:
 
-[^4]: **Dual-write code-change size depends on app abstraction.** If
-    the app already has a centralized storage-access package (a clean
-    `storage.Write(key, value)` interface), dual-write is a ~100–200
-    LOC change in that one package + semantics design — typically 1–2
-    weeks. If LDB calls are scattered through business logic
-    (`leveldb.OpenFile()` and `db.Put()` everywhere), the refactor is
-    weeks to a month and a missed call site silently breaks the
-    dual-write invariant. This is a Stage 3 question worth asking
-    early because the answer changes the migration timeline by an
-    order of magnitude.
+    | Blocker | Detail |
+    |---|---|
+    | No subscription API | LevelDB's WAL (LOG file) is a per-process crash-recovery artifact; there is no public "subscribe to writes since LSN N" or "replay this WAL on a different instance" API |
+    | Internal format, no stability contract | WAL format is version-dependent; parsing WAL bytes directly creates a fragile fork that breaks on every LDB upgrade |
+    | Real alternatives both cost more | (a) Patch LDB source to add a hook → maintain a fork forever; (b) wrap LDB at the app layer → that's just dual-write under another name |
+
+    There is no "free" continuous-sync mechanism for LevelDB; the four
+    strategies in the § 2 table are the real options.
+
+[^4]: **Dual-write code-change size depends on app abstraction.**
+    The change size differs by an order of magnitude based on whether
+    the app's LDB access is centralized or scattered:
+
+    | App structure | Dual-write effort | Failure mode |
+    |---|---|---|
+    | Centralized storage-access package (clean `storage.Write(key, value)` interface) | ~100–200 LOC in one package + semantics design = 1–2 weeks | All sites covered by changing one package |
+    | LDB calls scattered through business logic (`leveldb.OpenFile()` + `db.Put()` everywhere) | Weeks to a month of refactor + full call-site audit | A missed call site silently breaks the dual-write invariant — divergent data, hard to debug |
+
+    This is a Stage 3 question worth asking early because the answer
+    changes the migration timeline by an order of magnitude.
 
 [^5]: **Dual-write SEMANTICS — five corner cases the app must decide.**
     LDB code is unchanged in all dual-write strategies; the harder
@@ -379,15 +379,16 @@ needs; otherwise the default in the first table is correct.
     design decision; the LDB code change is the easy part.
 
 [^6]: **ALB TGB phase soak rationale.** Three soak windows balance
-    "detect divergence" vs "migration completion timeline". 24 h canary
-    catches diurnal traffic patterns (peak hours expose load-dependent
-    bugs that 1-h soak misses). 48 h cohort exposes weekly-cycle effects
-    at half-rate (so any divergence affects half the cohort, not all).
-    7-day full-cutover soak before decommission gives time to detect
-    subtle data divergence (e.g. a tenant's monthly batch job that
-    surfaces a bug not seen during peak). Operator can tighten these
-    if confidence is higher (canary 4 h / cohort 12 h / full 2 days)
-    or loosen for higher-stakes deployments.
+    "detect divergence" vs "migration completion timeline":
+
+    | Phase | Default soak | What it catches | Higher-confidence tighter | Higher-stakes looser |
+    |---|---|---|---|---|
+    | Canary 10% | 24 h | Diurnal traffic patterns — peak hours expose load-dependent bugs that 1 h soak misses | 4 h | 72 h |
+    | Cohort 50% | 48 h | Weekly-cycle effects at half-rate — divergence affects half the cohort not all | 12 h | 7 days |
+    | Full 100% (pre-decommission) | 7 days | Subtle data divergence — e.g. a tenant's monthly batch job surfacing a bug not seen during peak | 2 days | 30 days |
+
+    Operator can tighten or loosen all three independently per the
+    customer's risk tolerance.
 
 [^7]: **Route 53 TTL drop rationale (1 week before cutover).** DNS
     resolvers cache records up to the TTL value. Dropping TTL from
