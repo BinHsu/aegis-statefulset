@@ -94,10 +94,18 @@ log "Summary"
 ls -lh "$OUT_DIR/"*.pdf 2>/dev/null || echo "  (no PDFs produced)"
 echo
 
+PRODUCED=$(ls -1 "$OUT_DIR"/*.pdf 2>/dev/null | wc -l | tr -d ' ')
+
+if [[ $SKIP_DR -eq 1 ]]; then
+  echo "$PRODUCED of 4 PDFs ready in: $OUT_DIR (03 DR Demo skipped per --skip-dr)"
+  echo "Re-run without --skip-dr after Thu chaos demo to produce 03_DR_Demo_Report.pdf."
+else
+  echo "$PRODUCED of 4 PDFs ready in: $OUT_DIR"
+fi
+echo "Attach these to the submission email per runbook 05."
+
 if [[ $fail -gt 0 ]]; then
-  echo "Completed with $fail failure(s) — see logs above" >&2
+  echo
+  echo "WARNING: $fail PDF(s) failed to render — see logs above" >&2
   exit 1
 fi
-
-echo "All 4 PDFs ready in: $OUT_DIR"
-echo "Attach these to the submission email per runbook 05."
