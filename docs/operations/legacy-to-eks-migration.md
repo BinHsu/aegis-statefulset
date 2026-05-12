@@ -271,6 +271,10 @@ Provider-specific concrete CLI (replace per customer's actual stack):
 | NS1 | `ns1 record edit … --weight N` |
 | Akamai | Property Manager + Fast Purge for TTL flush |
 
+### Decision flow — visual
+
+<img src="../diagrams/d9-migration-pattern-decision.svg" alt="Migration pattern decision: source AWS or non-AWS → ALB TGB default or DNS/edge weighted default; deviation triggers (per-tenant / WAF in front / seconds rollback / Cloudflare) branch to Patterns B/C/D/E" width="100%" />
+
 ### When to deviate from default — three triggers
 
 These deviations apply ONLY when the customer signals one of these

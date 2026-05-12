@@ -28,6 +28,16 @@ cannot.
 | **C** | Pattern 1 (shared) | Extraction code (~1 month) | Full per-tenant relocation via app-level dump/load |
 | **D** | Pattern 2 (per-tenant) | None | Full per-tenant relocation via filesystem-grained move |
 
+### Visual — decision flow
+
+<img src="../diagrams/d8-tier-decision-matrix.svg" alt="Tier decision flow: LDB layout (Pattern 1 vs Pattern 2) + app changeability (immutable / small metric / extraction code) → Tier A/B/C/D with their capabilities" width="100%" />
+
+Tier D (Pattern 2, no app changes) is the architectural sweet spot —
+filesystem-grained relocation with zero application work. Tier C
+(Pattern 1 + extraction code) achieves the same operational capability
+but costs a month of application engineering. Tier B is the cheap
+diagnosis-only stepping stone. Tier A is the no-investment baseline.
+
 ---
 
 ## Tier A — Pattern 1 + no app changes

@@ -1,0 +1,26 @@
+flowchart TD
+    Start([Per-tenant relocation<br/>capability question]):::start
+
+    Q1{LDB layout?}:::question
+    Start --> Q1
+
+    Q1 -->|Pattern 1<br/>shared LDB| Q2{App changeability?}:::question
+    Q1 -->|Pattern 2<br/>one LDB per tenant| TierD["<b>Tier D</b><br/>Pattern 2 plus no app changes<br/>• Full per-tenant relocation<br/>• Filesystem-grained move<br/>• Sub-minute cutover possible"]:::leafD
+
+    Q2 -->|Container immutable| TierA["<b>Tier A</b><br/>Pattern 1 plus no app changes<br/>• Whole-pod migration only<br/>• No per-tenant move<br/>• Noisy-neighbour unmitigated"]:::leafA
+
+    Q2 -->|Small metric<br/>one counter only| TierB["<b>Tier B</b><br/>Pattern 1 plus telemetry<br/>• Identify hot tenant<br/>• Operational alert<br/>• Still no per-tenant move"]:::leafB
+
+    Q2 -->|Extraction code<br/>roughly 1 month work| TierC["<b>Tier C</b><br/>Pattern 1 plus extraction<br/>• Full per-tenant relocation<br/>• Dump-plus-load via app API<br/>• Brief read-only window per move"]:::leafC
+
+    TierA -.->|Stage 3<br/>question| Q3([Evolve to B or C?<br/>Or pod-grained forever?]):::stage3
+    TierD -.->|Architectural<br/>sweet spot| Note1[Cleanest relocation story:<br/>no app changes needed]:::note
+
+    classDef start fill:#e3f2fd,stroke:#1976d2,color:#0d47a1,stroke-width:2px
+    classDef question fill:#fff3e0,stroke:#f57c00,color:#bf360c
+    classDef leafA fill:#ffebee,stroke:#c62828,color:#b71c1c
+    classDef leafB fill:#fff8e1,stroke:#f9a825,color:#e65100
+    classDef leafC fill:#f1f8e9,stroke:#558b2f,color:#33691e
+    classDef leafD fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20,stroke-width:3px
+    classDef stage3 fill:#f3e5f5,stroke:#7b1fa2,color:#4a148c
+    classDef note fill:#e0f7fa,stroke:#00838f,color:#006064

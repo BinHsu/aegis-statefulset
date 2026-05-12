@@ -1,0 +1,27 @@
+flowchart TD
+    Start([Migration traffic-cutover<br/>pattern decision]):::start
+
+    Q1{Where does<br/>legacy live?}:::question
+    Start --> Q1
+
+    Q1 -->|AWS<br/>EC2 or ECS or EKS| PatALB["<b>Default: ALB TGB</b><br/>weighted shift<br/>Pattern 4a<br/>• Seconds-reversible<br/>• WAF and Shield inline<br/>• Zero AWS egress"]:::default
+    Q1 -->|Non-AWS<br/>on-prem or other cloud| Q2{Any deviation<br/>trigger fires?}:::question
+
+    Q2 -->|No| PatDNS["<b>Default: DNS or edge<br/>weighted</b><br/>Pattern 4b<br/>• Route 53 or Cloudflare<br/>• NS1 or Akamai or Fastly<br/>• No network prereq<br/>• TTL drag is only cost"]:::default
+
+    Q2 -->|Per-tenant<br/>granularity needed| PatB["<b>Pattern B</b><br/>ALB-fronted plus<br/>EKS Envoy reverse-proxy<br/>plus placement table<br/>ADR-03"]:::deviation
+
+    Q2 -->|WAF or Shield in front<br/>during migration| PatBD{B or D?<br/>flexibility vs simplicity}:::question
+    PatBD --> PatB
+    PatBD --> PatD["<b>Pattern D</b><br/>API Gateway proxy<br/>• Native canary stages<br/>• No IP constraint<br/>• 50ms latency overhead<br/>• 3.50USD per million requests"]:::deviation
+
+    Q2 -->|Seconds rollback<br/>required| Q3{Have DX or VPN?<br/>RFC 1918 reachable?}:::question
+    Q3 -->|Yes — DX or VPN<br/>plus RFC 1918| PatC["<b>Pattern C</b><br/>ALB Target Group ip type<br/>to on-prem<br/>• Lowest latency<br/>• Public IP NOT supported<br/>• DX or VPN required"]:::deviation
+    Q3 -->|No — public IP only| PatB
+
+    Q2 -->|Already on<br/>Cloudflare plus<br/>per-tenant at edge| PatE["<b>Pattern E</b><br/>Cloudflare Workers<br/>edge per-tenant routing<br/>• Skips EKS hop<br/>• Cloudflare lock-in<br/>• 50ms CPU budget<br/>• LB Pro or Business tier"]:::deviation
+
+    classDef start fill:#e3f2fd,stroke:#1976d2,color:#0d47a1,stroke-width:2px
+    classDef question fill:#fff3e0,stroke:#f57c00,color:#bf360c
+    classDef default fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20,stroke-width:3px
+    classDef deviation fill:#f3e5f5,stroke:#7b1fa2,color:#4a148c
