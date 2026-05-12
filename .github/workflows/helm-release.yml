@@ -61,7 +61,7 @@ jobs:
 
       # ADR-032: keyless Cosign signing via OIDC. No long-lived signing key.
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3.4.0  # Renovate will pin to SHA on first weekly run; see ADR-09
+        uses: sigstore/cosign-installer@e1523de7571e31dbe865fd2e80c5c7c23ae71eb4  # v3.4.0 — SHA-pinned per ADR-09; refresh via Renovate
 
       - name: Sign chart with Cosign
         env:
