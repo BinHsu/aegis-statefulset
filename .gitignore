@@ -85,3 +85,10 @@ venv/
 *.bak
 *.backup
 *.orig
+
+# =============================================================
+# Chaos demo evidence — intermediate output captured Thu morning;
+# DR_report.md intermediate + raw evidence captures are not committed
+# (final artifact ships as docs/DR_report.pdf which is committed).
+# =============================================================
+chaos-evidence/

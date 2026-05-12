@@ -42,7 +42,7 @@
 
 ## 2. Architecture under test
 
-<img src="diagrams/d1-high-level.svg" alt="High-level architecture" width="100%" />
+<img src="../diagrams/d1-high-level.svg" alt="High-level architecture" width="100%" />
 
 The architecture under test is the Wave 4 topology:
 
@@ -52,7 +52,7 @@ The architecture under test is the Wave 4 topology:
 - **Dual-cadence backup** — 5-min operational (source region only) + 4-h DR (cross-region)
 - **Three-Layer DR** — Terraform infra / Helm via terraform `helm_release` for cluster controllers / Velero for application + data
 
-Full architectural reasoning: [`docs/adr/ADR-04-backup-dr-and-ha.md`](adr/ADR-04-backup-dr-and-ha.md) and [`docs/operations/why-cold-dr.md`](operations/why-cold-dr.md).
+Full architectural reasoning: [`docs/adr/ADR-04-backup-dr-and-ha.md`](../adr/ADR-04-backup-dr-and-ha.md) and [`docs/operations/why-cold-dr.md`](why-cold-dr.md).
 
 ---
 
@@ -262,11 +262,11 @@ Each subdirectory has its own `README.md` summarising what was captured at that 
 
 ## 10. Cross-references
 
-- [`docs/SUBMISSION.md`](SUBMISSION.md) — submission cover + § 0 grounding + § 6 DR three paths + § 7 cost
-- [`docs/adr/ADR-04-backup-dr-and-ha.md`](adr/ADR-04-backup-dr-and-ha.md) — architectural decisions tested in this demo
-- [`docs/operations/why-cold-dr.md`](operations/why-cold-dr.md) — full reasoning for the cold-DR posture
-- [`docs/operations/region-failure-recovery.md`](operations/region-failure-recovery.md) — operator runbook for the region cutover path
-- [`docs/future/README.md`](future/README.md) — what happens to this architecture across T+1y / T+3y / T+5y / T+10y horizons
+- [`docs/SUBMISSION.md`](../SUBMISSION.md) — submission cover + § 0 grounding + § 6 DR three paths + § 7 cost
+- [`docs/adr/ADR-04-backup-dr-and-ha.md`](../adr/ADR-04-backup-dr-and-ha.md) — architectural decisions tested in this demo
+- [`docs/operations/why-cold-dr.md`](why-cold-dr.md) — full reasoning for the cold-DR posture
+- [`docs/operations/region-failure-recovery.md`](region-failure-recovery.md) — operator runbook for the region cutover path
+- [`docs/future/README.md`](../future/README.md) — what happens to this architecture across T+1y / T+3y / T+5y / T+10y horizons
 
 ---
 
