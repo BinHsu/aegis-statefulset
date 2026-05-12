@@ -70,6 +70,10 @@ to tighten this. Four mechanisms — "WAL log-shipping" is NOT one of them [^3]:
 | **AWS MGN block-level continuous** | 0 | 0 | ~10 sec replication lag | Agent install on legacy; AWS MGN per-host fee | AWS MGN service + agent on legacy |
 | **App-layer dual-write** | 0 | small–medium [^4] | 0 | Weeks of dual-write SEMANTICS design [^5] | App process (legacy AND EKS) |
 
+All non-dual-write strategies trigger an `fsfreeze` per sync event; the
+kernel → app → ALB → client 5-layer trace is in [^9] — relevant when
+freeze duration spikes above the normal sub-second window.
+
 ### Rsync — runs as K8s Job, not inside the StatefulSet pod
 
 Not inside the main pod (pollutes the image + breaks PSS `restricted`).
@@ -214,38 +218,52 @@ API tier placement-table cache TTL (default 5 sec) propagates the change.
 
 ## § 4 — Traffic cutover
 
-Two routing layers depending on source.
+Two default rules by source. Deviation patterns in [^10].
 
-### ALB target group binding (TGB) weighted shift — same VPC / same account
+### Default rule
 
-Single ALB, two target groups. Phase shifts [^6]:
+| Source | Default cutover lever | Why |
+|---|---|---|
+| **AWS-hosted** (EC2 / ECS / existing K8s in AWS) | **ALB target group binding (TGB) weighted shift** | Same AWS control plane; TGB shift is seconds-reversible; WAF / Shield already in line; zero AWS egress |
+| **Non-AWS** (on-prem / other cloud / non-AWS K8s) | **Route 53 weighted DNS** | Zero network plumbing prerequisite; public IPs OK; TTL propagation delay is the only cost |
 
-| Phase | weight (legacy : EKS) | Soak before next |
+Cross-region AWS sources combine both: Route 53 latency routing as
+outer envelope to pick the region, ALB TGB as inner cutover lever
+within each region.
+
+### Pattern 4a — ALB TGB weighted shift (AWS source default)
+
+Single ALB, two target groups (legacy + EKS). Phase shifts [^6]:
+
+| Phase | Weight (legacy : EKS) | Soak before next |
 |---|---|---|
 | Phase 0 | 100 : 0 | (baseline) |
 | Phase 1 (canary) | 90 : 10 | 24 h |
 | Phase 2 (cohort) | 50 : 50 | 48 h |
-| Phase 3 (full) | 0 : 100 | 7 days before decommission |
+| Phase 3 (full) | 0 : 100 | 7 days before legacy decommission |
 
-L7 connection-drained — clients perceive zero connection break.
+L7 connection-drained shift — clients perceive zero connection break.
 
-### Route 53 DNS weighted routing — cross-VPC / cross-region / cross-cloud
+### Pattern 4b — Route 53 weighted DNS (non-AWS source default)
 
-1. **One week before cutover** — drop TTL 300 sec → 30 sec so client
-   caches expire quickly on cutover day [^7]
-2. **Cutover day** — shift weight from legacy → new EKS ALB endpoint
-3. **One day after stable** — raise TTL back to 300 sec
+Three-step timing:
 
-### Mapping to § 1 scenarios
+| Timing | Action | Why |
+|---|---|---|
+| One week before cutover | Drop record TTL 300 sec → 30 sec | Resolvers refresh once before cutover day; aggressive caches still cap at ~5 min [^7] |
+| Cutover day | Shift weight from legacy → new EKS ALB endpoint | Most clients propagate within 30 sec; 5-min "shadow serve" on legacy catches stragglers |
+| One day after stable | Raise TTL back to 300 sec | Reduce DNS query load + resolver pressure |
 
-| Source scenario | Routing layer |
-|---|---|
-| EC2 / ASG same VPC | ALB TGB only |
-| EC2 cross-region | Route 53 latency routing + per-region ALB |
-| On-prem | Route 53 DNS CNAME flip |
-| Other-cloud VM | Route 53 DNS-level switch |
-| ECS Fargate | TGB (usually) |
-| Existing K8s cluster | Velero restore + Service flip |
+### When to deviate from default — three triggers
+
+These deviations apply ONLY when the customer signals one of these
+needs; otherwise the default in the first table is correct.
+
+| Trigger | Use deviating pattern | Why |
+|---|---|---|
+| Per-tenant canary needed (specific tenants advance / hold independent of cohort) | Pattern B [^10] — ALB-fronted with EKS Envoy reverse proxy + placement-table per-tenant routing (ADR-03) | Route 53 / ALB TGB only do whole-traffic %; only the app-layer placement table knows tenants |
+| AWS WAF / Shield must protect legacy during migration window | Pattern B or D [^10] | Pattern A keeps legacy un-fronted until cutover day; B/D move legacy behind AWS edge from day 0 |
+| Seconds-level rollback required (regulated industry) | Pattern B, C, or D [^10] | DNS TTL drag (30 sec – 5 min) is too slow; API-call rollback is seconds |
 
 ---
 
@@ -271,26 +289,33 @@ L7 connection-drained — clients perceive zero connection break.
 
 ## Footnotes — trade-offs, math, edge cases
 
-[^1]: **EBS Snapshot Copy timing.** 2 TB cross-region (us-east-1 →
-    eu-central-1) is typically ~30 min wall-clock per
-    [AWS EBS Snapshot Copy docs](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-copy-snapshot.html).
-    Actual time varies with snapshot delta size, the region pair, and
-    AWS-internal throttling. Same-region copy is faster (~10 min for
-    2 TB). EBS Snapshot is incremental against prior snapshots from the
-    same volume — first migration snapshot is full size; subsequent
-    "final delta" snapshots in a dual-cadence pattern transfer only
-    changed blocks.
+[^1]: **EBS Snapshot Copy timing — 2 TB reference table:**
 
-[^2]: **On-prem 2 TB / 1 Gbps WAN physics.** Theoretical line rate
-    transfer time: `2 × 10¹² × 8 bits / 10⁹ bps = 16 000 sec ≈ 4.4 h`.
-    Real-world transfers hit 70–80% line-rate efficiency due to TCP
-    overhead, packet loss recovery, and concurrent traffic — so the
-    practical figure is 5–6 h, saturating the 6 h RPO budget. Mitigation
-    options: AWS Direct Connect (10 Gbps drops this to ~30 min), AWS
-    Snowball Edge (physically ship the data, no network involvement,
-    days of wall-clock but zero RPO-budget consumption during transit
-    if combined with continuous sync at the cutover endpoint), or
-    multi-Gbps internet uplink upgrade.
+    | Region pair | Wall-clock | Notes |
+    |---|---|---|
+    | Same region | ~10 min | Fastest path |
+    | Cross-region (e.g. us-east-1 → eu-central-1) | ~30 min | AWS-internal bandwidth, dominated by inter-region link |
+    | Cross-region — incremental delta | minutes | Only changed blocks (EBS Snapshot is incremental against prior snapshots from same volume) |
+
+    Source: [AWS EBS Snapshot Copy docs](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-copy-snapshot.html).
+    First migration snapshot is full size; subsequent "final delta"
+    snapshots in a dual-cadence pattern transfer only changed blocks.
+    Actual time varies with snapshot delta size, region pair, AWS-internal
+    throttling.
+
+[^2]: **On-prem 2 TB transfer time — bandwidth options:**
+
+    | Network shape | 2 TB transfer time | Notes |
+    |---|---|---|
+    | 1 Gbps line rate (theoretical) | 4.4 h | `2 × 10¹² × 8 / 10⁹ = 16 000 sec` |
+    | 1 Gbps real-world (70–80% efficiency) | 5–6 h | Saturates 6 h RPO budget; TCP overhead, packet loss recovery |
+    | AWS Direct Connect 10 Gbps | ~30 min | 10× bandwidth; small budget consumption |
+    | AWS Snowball Edge | Days wall-clock | Physical ship; **zero RPO-budget consumption during transit** if combined with continuous sync at the cutover endpoint |
+    | Multi-Gbps internet uplink upgrade | Variable | Customer-specific cost depending on local ISP |
+
+    1 Gbps without DX / Snowball is the worst case — eats the entire
+    6 h RPO budget on transfer alone, leaving no margin for cutover
+    delta. Direct Connect or Snowball changes the calculus completely.
 
 [^3]: **Why "WAL log-shipping" is not a real option.** A reader might
     propose "monitor legacy's LevelDB WAL/LOG file and replay into the
@@ -356,17 +381,117 @@ L7 connection-drained — clients perceive zero connection break.
     day to catch these clients. After 24 h of stable EKS operation,
     raise TTL back to 300 sec to reduce DNS query rate and resolver load.
 
-[^8]: **Rollback after placement flip — data-loss math.** Between
-    placement flip and rollback decision, writes have been landing on
-    the EKS pod. If rollback happens at T+15min after flip, those 15
-    minutes of EKS-side writes are abandoned (legacy did not receive
-    them). At the architecture's default 5-min backup cadence, those
-    writes ARE captured in EKS-side EBS Snapshots — recoverable via
-    Velero restore later if the customer changes their mind, but not
-    automatically. Soak window length is the operator's confidence
-    threshold: longer soak → more EKS-side data accumulates → bigger
-    blast radius on rollback. Typical shape: 24 h canary, 48 h cohort,
-    7 days full before decommissioning legacy.
+[^8]: **Rollback after placement flip — data-loss math by elapsed time:**
+
+    | Time since placement flip | EKS-side accumulated writes | Rollback automatic? | Recovery if customer changes mind |
+    |---|---|---|---|
+    | < 5 min | < 1 backup cycle (~1 cadence period) | Yes — flip back, accept loss | Manual; writes not yet in any backup |
+    | 5 min – 24 h (canary phase) | Captured in EBS Snapshots @ 5-min cadence | Yes — flip back; lose post-snapshot delta only | Velero restore from latest EKS snapshot |
+    | 24 h – 7 d (cohort/full) | Same as above + cumulative | Yes — but blast radius grows linearly | Velero restore |
+    | > 7 d (post-decommission) | Legacy is gone | **No** — one-way commit point | Only EKS-side disaster recovery applies |
+
+    Soak window length is the operator's confidence threshold. Longer
+    soak → more EKS-side data accumulates → bigger blast radius on
+    rollback. Typical shape: 24 h canary, 48 h cohort, 7 days full
+    before decommissioning legacy.
+
+[^9]: **`fsfreeze` impact — kernel → app → ALB → client 5-layer trace.**
+    Velero's pre-snapshot hook (or rsync pre-quiesce) triggers a
+    filesystem freeze. Writes are queued, not dropped, at kernel layer;
+    each higher layer adds its own drop conditions.
+
+    **Layer trace — what happens to a write during freeze:**
+
+    | Layer | Mechanism during freeze | Drop behavior |
+    |---|---|---|
+    | Kernel syscall | `write()` / `fsync()` sleep in waitqueue (`D` state) | None — pure queue, all writes complete after unfreeze in original order |
+    | App handler thread | Worker blocked in `db.Put()` → blocked in `write()` | App-internal queue grows; goroutine model accumulates pending I/O |
+    | HTTP server | `accept()` still works (socket syscall, not fs); but workers exhausted at sustained high QPS | 503 / connection refused if worker pool maxed |
+    | ALB upstream | Pod stays in pool until health check fails (default 5 sec interval × 5 retries = 25 sec) | 504 after idle_timeout 60 sec; pod removed after HC failure threshold |
+    | Client SDK | Sees high latency, then timeout per its policy | Retry / give up — client-policy dependent |
+
+    **Freeze duration → cross-layer impact at default ALB / Velero config:**
+
+    | Freeze duration | Kernel | App | ALB | Client |
+    |---|---|---|---|---|
+    | < 1 sec (normal) | queue | OK | not noticed | p99 spike to ~1 sec |
+    | 1–5 sec | queue | some workers blocked | not noticed | p99 spike; some retries fire |
+    | 5–25 sec | queue | worker pool full → app returns 503 | not noticed (HC has not failed yet) | client-side timeouts begin |
+    | 25–30 sec | queue | 503 | **health check fails → pod removed from TG → traffic dropped** | mass timeouts |
+    | > 30 sec | queue | 503 | pod already out of pool | drops |
+
+    Velero default pre-hook timeout is 30 sec for exactly this reason —
+    it aborts the snapshot before crossing into the "ALB removes pod"
+    zone.
+
+    **Which § 2 strategy triggers freeze, how often:**
+
+    | § 2 strategy | Triggers `fsfreeze`? | Frequency | Mitigation |
+    |---|---|---|---|
+    | Rsync incremental | Yes (per rsync run, if quiesce wrapped around it) | Per CronJob tick (e.g. every 15 min during sync window) | Schedule off-peak; coordinate with normal backup cadence |
+    | EBS Snapshot dual-cadence | Yes (per snapshot) | Per cadence (5 min operational / 4 h DR) | Same as normal ops — no extra cost during migration |
+    | AWS MGN block-level | **No** | N/A | Block layer below filesystem; MGN's hidden win for freeze-sensitive workloads |
+    | App-layer dual-write | **No** | N/A | Continuous parallel writes; zero quiesce needed |
+
+    For our default architecture (5-min Velero cadence, Velero pre-hook
+    fsfreeze): every 5 min there's a ~1 sec spike. **0.3% wall-clock at
+    elevated p99**, zero drops under normal disk pressure. The danger
+    zone is only reached when LDB is doing a large MemTable flush or
+    SSTable compaction at the same instant freeze fires — operator
+    should monitor backup duration and alert at 10 sec+ as a degraded
+    signal before reaching the 30-sec Velero abort.
+
+[^10]: **Deviation patterns from § 4 default cutover rule.** The default
+    in § 4 (AWS → ALB / non-AWS → Route 53) handles the common cases.
+    Three deviating patterns exist for the three triggers named in § 4:
+
+    **Pattern B — ALB-fronted with EKS Envoy reverse proxy.** Route 53
+    points at AWS ALB; ALB sends traffic to EKS API tier; EKS Envoy
+    upstream cluster reverse-proxies to legacy. DNS-flip happens early
+    (low-risk one-time event); subsequent traffic shifts happen at
+    ALB TGB or Envoy weight (seconds-reversible). Adds per-tenant
+    canary capability via the ADR-03 placement table. Cost: one
+    extra hop per request (AWS ↔ legacy network roundtrip,
+    ~5 ms with DX, ~50 ms over public internet) + AWS egress fees
+    per request that hits legacy.
+
+    **Pattern C — ALB Target Group `ip` type pointing directly at
+    on-prem / cross-cloud.** ALB Target Groups support `ip` type which
+    can route to RFC 1918 IPs reachable from the VPC. Simpler than
+    Pattern B (no EKS proxy hop) but **requires Direct Connect or
+    Site-to-Site VPN** because public IPs are not supported as IP
+    targets (per [AWS ALB target group docs](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-target-groups.html)).
+    Best when migration is cohort-level only (no per-tenant canary
+    need) and customer already has DX/VPN.
+
+    **Pattern D — API Gateway proxy.** API Gateway can backend to any
+    public HTTP URL (no RFC 1918 constraint). Native canary deployment
+    feature on stages. Trade-off: ~50 ms latency overhead vs ALB,
+    pricing is per-request ($3.50 per million requests + egress) which
+    becomes significant at high QPS. Best when customer already has
+    API Gateway in their stack, or needs the native canary deployment
+    pattern.
+
+    **Decision matrix — when to pick which:**
+
+    | Trigger | Public IP only | DX/VPN available | Pick |
+    |---|---|---|---|
+    | Per-tenant canary needed | Either | Either | **B** (placement table integration) |
+    | WAF/Shield in front during migration | Either | Either | B (most flexible) or D (simplest) |
+    | Seconds rollback only | Public IP only | No DX/VPN | B (Envoy upstream weight) or D |
+    | Seconds rollback only | RFC 1918 OK | DX/VPN exists | **C** (simplest, low latency) |
+
+    **Setup time comparison for the deviation patterns:**
+
+    | Pattern | Network prerequisite | Setup time |
+    |---|---|---|
+    | B | None (can route via public internet) or DX/VPN | Days (Envoy config + EKS bring-up) |
+    | C | DX (weeks) or Site-to-Site VPN (~1 day) | ~1 day (after network plumbing) |
+    | D | None | Hours (API Gateway config) |
+
+    The default rule (§ 4 first table) is right for ~80% of Mittelstand-
+    scale customers; the deviations cover the remaining 20% where one
+    of the three triggers fires.
 
 ---
 
