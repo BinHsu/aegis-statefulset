@@ -73,9 +73,10 @@ Production sync is **manual** by design — see [`gitops/argocd/README.md`](gito
 Two organising principles plus one reliability discipline anchor every decision.
 
 **P1 — Data on EBS is the only irreplaceable asset; everything else is declarative.**
-Customer state lives on encrypted EBS volumes managed via LVM. Cluster, deployments,
-routing tables, container images, AZ topology — all reproducible in 30–60 minutes
-from Helm + Terraform.
+Customer state lives on encrypted EBS volumes — split per-pod into `data` and `wal`
+PVCs (Path γ multi-PVC; literal LVM available as opt-in patch per ADR-02). Cluster,
+deployments, routing tables, container images, AZ topology — all reproducible in
+30–60 minutes from Helm + Terraform.
 
 **P2 — RPO is a configurable trade-off, not a fixed floor.**
 Default 5-min cadence yields typical recovery point ~30 sec; the lever is exposed
@@ -125,7 +126,7 @@ The operationally consequential knobs are summarised below; full schema lives in
 | `backup.dr.cadence_hours` | `4` | DR-tier cadence; ≤ 5 h is the sane upper bound against the 6 h RPO ceiling |
 | `stateful.cells.count` | `1` | POC default 1; production matches existing partitioning per ADR-05 |
 | `stateful.startup_probe.failure_threshold` | `60` | 60 × 30s = 30 min cold-start window for production LDB MemTable rebuild |
-| `storage.ebs_size_gb` | `2048` | Per-pod EBS size; LVM-managed and online-expandable |
+| `stateful.cells.storage.data` / `.wal` | `1843Gi` / `205Gi` (prod) | Multi-PVC split (Path γ per ADR-02); both PVCs CSI-snapshotted atomically; online-expandable via CSI resize |
 | `master_az` | `eu-central-1a` | Master AZ for all workloads; rotation via `aws eks update-nodegroup-config` |
 | `dr_region` | `eu-west-1` | Cross-region DR target for EBS Snapshot copy |
 | `routing.backend` | `dynamodb` | Customer can substitute any backend that satisfies the 6-property contract |
