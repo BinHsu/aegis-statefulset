@@ -104,7 +104,7 @@ jobs:
           terraform validate
 
       - name: tflint (ADR-037)
-        uses: terraform-linters/setup-tflint@90f302c255ef959cbfb4bd10581afecdb7ece3e6  # v3.0.0 — TODO verify SHA via Renovate
+        uses: terraform-linters/setup-tflint@v3.0.0  # Renovate will pin to SHA on first weekly run; see ADR-09
 
       - name: Run tflint
         run: |
@@ -114,7 +114,7 @@ jobs:
           tflint --recursive
 
       - name: tfsec (ADR-037)
-        uses: aquasecurity/tfsec-action@b466648d6e39e7c75324f25d83891162a721f2d6  # v1.0.3 — TODO verify SHA via Renovate
+        uses: aquasecurity/tfsec-action@v1.0.3  # Renovate will pin to SHA on first weekly run; see ADR-09
         with:
           working_directory: infrastructure/terraform
 
@@ -153,7 +153,7 @@ jobs:
           fi
 
       - name: Trivy filesystem scan (ADR-032)
-        uses: aquasecurity/trivy-action@aaf3aaeb0f0c7706a6ed4a52d1b3afdd92dccca9  # v0.16.0 — TODO verify SHA via Renovate
+        uses: aquasecurity/trivy-action@v0.16.0  # Renovate will pin to SHA on first weekly run; see ADR-09
         with:
           scan-type: fs
           scan-ref: .

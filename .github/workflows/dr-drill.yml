@@ -98,7 +98,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: File drill report issue
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1 — TODO verify SHA via Renovate
+        uses: actions/github-script@v7.0.1  # Renovate will pin to SHA on first weekly run; see ADR-09
         with:
           script: |
             const path = '${{ steps.drill.outputs.drill_path }}';

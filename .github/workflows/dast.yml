@@ -56,7 +56,7 @@ jobs:
       # of breaking it. For pre-prod we'd run zap-full-scan against a dedicated
       # ephemeral env — out of POC scope.
       - name: Run ZAP baseline
-        uses: zaproxy/action-baseline@5b1ba3e2e0b1a8b8c6c3e2d5f7e8a9b0c1d2e3f4  # TODO pin via Renovate
+        uses: zaproxy/action-baseline@v0.10.0  # Renovate will pin to SHA on first weekly run; see ADR-09
         with:
           target: ${{ steps.target.outputs.url }}
           # Custom rule overrides — disable noisy or known-irrelevant checks.

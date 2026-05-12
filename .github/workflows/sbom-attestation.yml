@@ -102,7 +102,7 @@ jobs:
       # transparency log — the L3 "non-falsifiable provenance" requirement.
       - name: Generate SLSA build provenance
         if: steps.image.outputs.digest != ''
-        uses: actions/attest-build-provenance@a473f60d31bcd1ddd9e9b5c7d44ea33da7a45c10  # v1.1.1 — TODO verify SHA via Renovate
+        uses: actions/attest-build-provenance@v1.1.1  # Renovate will pin to SHA on first weekly run; see ADR-09
         with:
           subject-name: ${{ steps.image.outputs.image }}
           subject-digest: ${{ steps.image.outputs.digest }}
