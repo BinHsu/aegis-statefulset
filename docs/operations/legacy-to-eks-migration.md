@@ -231,9 +231,12 @@ Cross-region AWS sources combine both: DNS-layer routing (Route 53
 latency routing or equivalent) as outer envelope to pick the region;
 ALB TGB as inner cutover lever within each region.
 
-When the customer uses Cloudflare specifically, Workers (programmable
-edge scripts) unlock per-tenant routing at the edge — see Pattern E
-in [^10] for the case where this collapses Pattern B's extra hop.
+Weighted routing alone covers cohort-level cutover (standard
+Strangler-Fig % shift). Per-tenant granularity needs a programmable
+layer — typically the ADR-03 placement table at the EKS API tier.
+Edge scripting (Cloudflare Workers etc.) is an alternative ONLY for
+the narrow customer profile where it earns its place; see Pattern E
+in [^10] for the three conditions.
 
 ### Pattern 4a — ALB TGB weighted shift (AWS source default)
 
@@ -488,21 +491,56 @@ needs; otherwise the default in the first table is correct.
     API Gateway in their stack, or needs the native canary deployment
     pattern.
 
-    **Pattern E — Cloudflare Workers edge per-tenant routing.** When
-    the customer already uses Cloudflare as their DNS / edge, Workers
-    (JavaScript scripts running at Cloudflare edge nodes) can dispatch
-    per-request based on tenant_id / cookie / header — same role as
-    the ADR-03 placement table but at the edge layer. This collapses
-    Pattern B's extra hop (no EKS reverse-proxy needed for the
-    per-tenant routing) AND keeps WAF / DDoS protection integrated at
-    the same plane. Trade-offs: Cloudflare-specific (lock-in to this
-    provider); Workers have CPU-time limits (~50 ms default,
-    extendable to 30 sec with paid plan) which constrains complex
-    routing logic; Cloudflare LB tier (Pro / Business) required for
-    weighted pools. Best fit: customer is already a Cloudflare
-    Enterprise / Business customer and the migration is "AWS-as-the-
-    destination, Cloudflare-as-the-front-door" — Workers script
-    becomes the per-tenant placement layer.
+    **Pattern E — Cloudflare Workers edge per-tenant routing (narrow
+    use case).** Weighted routing in any DNS / edge provider is enough
+    for cohort-level migration — the standard Strangler-Fig % shift.
+    Programmable edge scripting only adds value when per-tenant
+    granularity is required, and even then our architecture already
+    provides that capability at the EKS API tier via the ADR-03
+    placement table. Pattern E (Cloudflare Workers) is the right
+    choice only in a narrow customer profile; otherwise it adds
+    complexity without architectural payoff.
+
+    **When is per-tenant routing actually needed during migration?**
+
+    | Migration intent | Weighted (DNS / ALB) enough? | Programmable needed? |
+    |---|---|---|
+    | Cohort-level % shift (standard Strangler Fig) | ✅ Yes | No |
+    | Pin tenant alice to legacy until manual approval | ❌ stochastic flapping per-request | Yes |
+    | Different cohorts on different schedules | ❌ | Yes |
+    | Identity / region-aware routing | ❌ weighted doesn't inspect request content | Yes |
+
+    **Conditions for Pattern E specifically (ALL three must hold):**
+
+    | Condition | Why it matters |
+    |---|---|
+    | Customer is already on Cloudflare Enterprise / Business | Don't introduce a new vendor purely for migration — reuse existing edge |
+    | Customer wants per-tenant routing AT THE EDGE, not in AWS API tier | Architectural choice: edge-layer routing saves a hop into AWS but adds vendor lock-in |
+    | Customer prefers to avoid building the EKS API tier reverse-proxy | Pattern B is the alternative; both deliver per-tenant routing, just at different layers |
+
+    **If any condition is missing → Pattern E is the wrong choice:**
+
+    | Missing condition | Better alternative |
+    |---|---|
+    | No existing Cloudflare investment | Pattern B (EKS Envoy + placement table) — no new vendor |
+    | Only cohort-level needed | Plain weighted DNS / ALB — no programmable layer at all |
+    | Going AWS-deep anyway (placement table is being built for steady state) | Pattern B reuses what you build for steady state; Pattern E adds a parallel system |
+
+    **Pattern E trade-offs if picked anyway:**
+
+    | Constraint | Detail |
+    |---|---|
+    | Vendor lock-in | Workers API is Cloudflare-specific; migrating off rewrites the script |
+    | CPU budget | Workers default 50 ms; up to 30 sec on paid plan; bounds complex routing logic |
+    | Paid tier required | Cloudflare LB needs Pro / Business tier ($5+/mo to $200+/mo) |
+    | State at edge | No persistent state in Workers itself; need KV / Durable Objects (paid) or external DB for placement data |
+
+    **Bottom line:** Pattern E is a real but narrow option. For most
+    migrations on our architecture, **weighted routing (cohort) +
+    ADR-03 placement table (per-tenant via Pattern B's EKS API tier)
+    is the right combination**. Pattern E fits only if the customer
+    has already invested in Cloudflare's edge fabric and explicitly
+    wants the per-tenant logic kept there rather than in AWS.
 
     **Decision matrix — when to pick which:**
 
