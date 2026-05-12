@@ -96,7 +96,7 @@ Layer 1 decisions are non-negotiable for the customer; the platform owns them.
 | L1.2 | EBS encryption at rest with per-tier customer-managed KMS keys | Compliance and blast-radius isolation. (ADR-07.) |
 | L1.3 | StatefulSet with `reclaimPolicy=Retain` + claimRef pre-binding | Pod-to-PV mapping must survive cluster recreation. (ADR-02.) |
 | L1.4 | 1:1 pod-to-node ratio for the stateful tier | Disk-bound workloads compete poorly for I/O; 1:1 is honest about it. (ADR-02.) |
-| L1.5 | LVM-managed EBS, online-expandable | The application's growth pattern is unpredictable; offline-resize is unacceptable downtime. (ADR-02.) |
+| L1.5 | Multi-PVC EBS storage (data + WAL) per pod, online-expandable via CSI volume resize | Spec named LVM; modern K8s database operators (TiDB / K8ssandra / CloudNativePG) use multi-PVC for the same WAL/data IO isolation benefit without privileged init or Kyverno PolicyException. Literal LVM available as opt-in patch (`docs/future/lvm-init-patch.md`). (ADR-02.) |
 | L1.6 | Cross-region S3 replication of backups | Single-region durability is not a DR posture. (ADR-04.) |
 | L1.7 | Three-path DR with named RPO/RTO per path | Operators must know which path applies for which failure shape. (ADR-04.) |
 | L1.8 | Three-Layer DR — Layer 1 (Velero) cold + Layer 2 (Terraform helm_release) warm + Layer 3 (Route 53) DNS | Each layer recovers a different failure class without contention. (ADR-04.) |
@@ -171,15 +171,22 @@ in the POC; the customer can swap any backend that meets it.
 
 ### 5b. Backup data flow (detail)
 
-<img src="diagrams/d3-backup-flow.svg" alt="Backup data flow — fsfreeze + LVM thin snapshot + CSI + Velero + EBS Snapshot + cross-region replication" width="100%" />
+<img src="diagrams/d3-backup-flow.svg" alt="Backup data flow — Velero pre-hook quiesce + CSI VolumeSnapshot per PVC + EBS Snapshot + cross-region replication" width="100%" />
 
-The backup pipeline starts at the application-aware preFreeze hook that
-calls `fsfreeze` against `/data` to give LevelDB a stable view; the LVM
-thin snapshot captures the consistent volume; the CSI driver creates a
-VolumeSnapshot CR; Velero orchestrates the EBS Snapshot. Two schedules
-land at different cadences: Schedule A (operational, 5-min, source-region
-only) and Schedule B (DR, 4-hour, source plus cross-region S3 replication
+The backup pipeline starts at the Velero pre-hook that triggers the
+application's admin `/quiesce` endpoint (mock: `sync && echo` no-op;
+production: flush MemTable + WAL + drop file lock) to give LevelDB a
+stable view; the CSI driver creates a VolumeSnapshot CR per PVC
+(both `data` and `wal` PVCs per the multi-PVC pattern, atomically
+within a single Velero Backup CR); Velero orchestrates the underlying
+EBS Snapshot at the AWS storage plane. Two schedules land at different
+cadences: Schedule A (operational, 5-min, source-region only) and
+Schedule B (DR, 4-hour, source plus cross-region S3 replication
 plus VolumeSnapshotLocation (VSL) cross-region snapshot copy).
+
+(LVM thin snapshot — the spec-literal pattern — is available as an
+opt-in path per `docs/future/lvm-init-patch.md`; modern K8s default
+delegates consistency to CSI VolumeSnapshot at the storage plane.)
 
 ### 5c. Three-tier multi-tenancy isolation (detail)
 

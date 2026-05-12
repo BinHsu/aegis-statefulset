@@ -87,7 +87,7 @@ anchor — *"the application should not need to know it's being migrated"*
 ```
 Stateful nodes (master AZ only)            ~€500/mo  (cells.count=1 default, r6id.xlarge on-demand)
 Stateless nodes (api + envoy + system)     ~€800/mo  (Karpenter mixed spot 70% / on-demand 30%)
-EBS gp3 (1× 2 TB primary, master AZ)       ~€200/mo
+EBS gp3 (2 TB total split data+WAL multi-PVC) ~€200/mo  (90%/10% data/WAL ratio per ADR-02)
 3× NAT Gateways                             ~€99/mo  (~€33/mo each, AWS list)
 EBS Snapshot (5-min cadence, 30-day)       ~€300/mo  (depends on block-change rate; estimate)
 Cross-region copy (Glacier IR)             ~€150/mo  (depends on snapshot delta volume)
@@ -117,7 +117,7 @@ sub-15-min recovery. Reasoning chain in `docs/operations/why-cold-dr.md`
 | `stateful.cells.count` | 1 | 1–N | Production scale matches customer's existing partitioning |
 | `routing.backend` | `dynamodb` | `dynamodb`, `customer_supplied` | Customer can substitute any 6-property-contract backend |
 | `observability.backend` | `grafana_cloud` | `grafana_cloud`, `amp_amg` | Vendor-reversible per ADR-06 |
-| `storage.ebs_size_gb` | 2048 | 512–16384 | Per-pod LVM-managed; online-expandable |
+| `stateful.cells.storage.data` / `.wal` | 18Gi / 2Gi (POC); 1843Gi / 205Gi (prod) | per-PVC | Multi-PVC layout per ADR-02; literal LVM available as opt-in patch |
 
 Full inventory in `helm/aegis-statefulset/values.yaml` with inline trade-off comments.
 
@@ -127,7 +127,8 @@ Full inventory in `helm/aegis-statefulset/values.yaml` with inline trade-off com
 |---|---|
 | **Cost methodology — formulas + AWS pricing URLs for every quantitative claim** | `docs/operations/cost-estimate-methodology.md` |
 | Why per-tenant pods, why single master AZ, why cells? | ADR-01 |
-| EBS sizing, LVM choice, Retain reclaim, 1:1 pod-to-node? | ADR-02 |
+| EBS sizing, multi-PVC layout (Path γ), Retain reclaim, 1:1 pod-to-node? | ADR-02 |
+| Literal LVM init container (the spec-literal opt-in)? | `docs/future/lvm-init-patch.md` |
 | Why DynamoDB placement table, why dedicated Envoy? | ADR-03 |
 | Why cold DR over active-passive? Three-Layer DR? | ADR-04 + `docs/operations/why-cold-dr.md` |
 | How does migration actually work? | ADR-05 |

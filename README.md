@@ -89,6 +89,7 @@ asymmetric thresholds prevent flap. No auto-failback ever.
 
 - **Per-tenant pod identity** — LevelDB is single-writer, file-based, no native replication; hash-sharding doesn't fit the storage primitive [^adr01]
 - **Single master AZ + warm-standby AZs** — cross-AZ chatter on a stateful tier without replication is wasted latency and double cost; AZ-B/C node groups sit at `desired=0` until a rotation event [^adr01]
+- **Multi-PVC storage (data + WAL) on EBS gp3** — the spec named LVM; modern K8s database operators (TiDB / K8ssandra / CloudNativePG) deliver the same WAL/data IO isolation + crash-consistent snapshot benefits via two PVCs + CSI VolumeSnapshot, without privileged init container or Kyverno PolicyException; literal LVM available as opt-in patch [^adr02] [^lvm-patch]
 - **Velero CSI Snapshot path** — the spec named Restic + LVM; Velero still wraps Restic / Kopia in its File System Backup (FSB) path, so the transport changed, not the toolchain [^velero-vs-restic]
 - **Cold DR over multi-region active-passive** — LevelDB has no sync APIs, so warm replicas are snapshot copies; the cost delta buys RTO that doesn't fit the ~25-min target [^cold-dr]
 - **DynamoDB Global Tables placement table** — 6-property contract (atomic compare-and-swap (CAS) / strong reads / multi-AZ durable / low latency / change-data-capture (CDC) / audit log); customer can substitute any backend that satisfies it [^adr03]
@@ -100,6 +101,8 @@ asymmetric thresholds prevent flap. No auto-failback ever.
 - **Cost-as-architecture** — tagging discipline + AWS Budgets + Cost Anomaly Detector + per-tenant Cost and Usage Report (CUR) + Athena attribution + Savings Plans strategy; day-1, not bolted on [^adr10]
 
 [^adr01]: [`docs/adr/ADR-01-architecture-and-topology.md`](docs/adr/ADR-01-architecture-and-topology.md)
+[^adr02]: [`docs/adr/ADR-02-storage-and-pv-mapping.md`](docs/adr/ADR-02-storage-and-pv-mapping.md)
+[^lvm-patch]: [`docs/future/lvm-init-patch.md`](docs/future/lvm-init-patch.md) — opt-in literal-LVM init container patch
 [^adr03]: [`docs/adr/ADR-03-routing-and-ingress.md`](docs/adr/ADR-03-routing-and-ingress.md)
 [^adr04]: [`docs/adr/ADR-04-backup-dr-and-ha.md`](docs/adr/ADR-04-backup-dr-and-ha.md)
 [^adr05]: [`docs/adr/ADR-05-migration-strangler-fig.md`](docs/adr/ADR-05-migration-strangler-fig.md)
