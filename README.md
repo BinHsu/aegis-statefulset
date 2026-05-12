@@ -116,6 +116,46 @@ asymmetric thresholds prevent flap. No auto-failback ever.
 
 ---
 
+## Visual tour
+
+### Request flow — ALB → API → Envoy → StatefulSet
+
+<img src="docs/diagrams/d2-3tier-flow.svg" alt="3-tier request flow: ALB at the edge, API tier handles business logic, Envoy router does placement-table lookup + sharded routing, StatefulSet hosts the per-tenant LevelDB pods" width="100%" />
+
+Edge / business-logic / routing / state are decoupled tiers. Each tier scales on its own shape — API on QPS, Envoy on routing-table churn, StatefulSet on tenant count. Pattern recognition, not invention: Vitess `vtgate`, DynamoDB request router, Stripe and Reddit shard-routers all do the same separation [^adr03].
+
+### Backup data flow — Velero CSI Snapshot per PVC
+
+<img src="docs/diagrams/d3-backup-flow.svg" alt="Backup data flow: Velero pre-snapshot hook triggers fsfreeze / app admin quiesce, then CSI VolumeSnapshot delegates to AWS EBS Snapshot for each PVC (data + WAL), then cross-region Glacier IR replication" width="100%" />
+
+Velero pre-hook quiesces the app, then CSI VolumeSnapshot fires per PVC (both `data` and `wal` snapshot atomically), then EBS Snapshot lands in S3, then cross-region copy ships to Glacier IR. Dual-cadence schedules: Schedule A (5-min, source-region only) for operational restore; Schedule B (4-h, cross-region) for DR-tier [^adr04] [^velero-vs-restic].
+
+### DR cutover — three paths based on what survived
+
+<img src="docs/diagrams/d4-dr-three-paths.svg" alt="DR cutover three paths: Path A — EBS volumes intact and reattachable (fastest, in-AZ recovery); Path B — routing layer or pods lost but EBS intact (rebuild stateless tiers, reattach EBS); Path C — region-wide failure requiring cross-region restore from Velero" width="100%" />
+
+Recovery shape depends on the failure shape. Path A (EBS intact) is fastest; Path B (stateless tiers gone, EBS intact) means redeploy via Helm + reattach; Path C (region failure) means cross-region Velero restore. Each path has its own runbook + bounded RTO target [^cold-dr] [^adr04].
+
+### Multi-tenancy isolation — three tiers
+
+<img src="docs/diagrams/d5-cell-isolation.svg" alt="Three isolation tiers: Tier 1 — dedicated AWS account per tenant (highest isolation, top-tier regulated); Tier 2 — dedicated VPC per tenant (medium-regulation default); Tier 3 — shared cluster + namespace (sandbox / low-trust)" width="100%" />
+
+Three deployment-time tiers map cleanly to compliance posture: dedicated account / dedicated VPC / shared cluster + namespace. Runtime isolation enforcement (NetworkPolicy, IRSA, per-tier KMS) is the consequence, not the choice [^adr01] [^adr07].
+
+### Migration — Strangler Fig at the infrastructure layer
+
+<img src="docs/diagrams/d6-strangler-fig.svg" alt="Strangler Fig migration phases: Phase 1 parallel infra (legacy EC2 + new EKS side-by-side); Phase 2 shadow verify (read-only probes against EKS); Phase 3 weighted cutover (90/10 → 50/50 → 0/100 via TargetGroupBinding); Phase 4 legacy decommission" width="100%" />
+
+Application container untouched. Migration substrate change happens at the routing layer via TargetGroupBinding weights — 90/10, 50/50, 0/100, with soak-window monitoring at each step. The anchor: *"the application should not need to know it's being migrated"* [^adr05].
+
+### Automation tier matrix — failure-mode catalog
+
+<img src="docs/diagrams/d7-automation-tier-matrix.svg" alt="Automation tier matrix: per failure-mode, classify as auto-recovered (CrashLoopBackOff restart, pod eviction reschedule, HPA/Karpenter scale-up) / semi-auto (AZ rotation runbook, region cutover runbook, cell expansion) / manual operator (tenant relocation, schema migration, KMS rotation)" width="100%" />
+
+Every named failure mode is classified into one of three columns: auto-recovered / semi-auto (runbook-driven) / manual operator. The principle from P3 — detection automatic, execution manual — maps directly to this matrix. Optional opt-in patches in `docs/future/` upgrade specific cells from semi-auto to auto [^adr04].
+
+---
+
 ## Configuration
 
 The operationally consequential knobs are summarised below; full schema lives in [`helm/aegis-statefulset/values.yaml`](helm/aegis-statefulset/values.yaml).
