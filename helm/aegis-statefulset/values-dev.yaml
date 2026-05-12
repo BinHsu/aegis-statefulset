@@ -6,7 +6,11 @@
 stateful:
   cells:
     count: 1
-    storage_per_pod: 50Gi  # smaller for dev cost
+    # Multi-PVC layout (Path γ per ADR-02) — see values.yaml for rationale.
+    # Dev: data 45Gi + wal 5Gi = 50Gi total (smaller for dev cost)
+    storage:
+      data: 45Gi
+      wal: 5Gi
   resources:
     requests:
       cpu: 100m

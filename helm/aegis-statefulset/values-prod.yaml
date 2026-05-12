@@ -9,7 +9,14 @@ stateful:
     # Production: cells.count = N (set via terraform import per ADR-05
     # to match existing per-tenant pod inventory).
     count: 9
-    storage_per_pod: 2Ti
+    # Multi-PVC layout (Path γ per ADR-02) — see values.yaml for rationale.
+    # Production: data 1843Gi + wal 205Gi ≈ 2 TiB total (10% WAL ratio).
+    # Tuning rationale: LDB SSTable forest grows as compaction merges
+    # writes; WAL is short-lived (synced + truncated on memtable flush)
+    # so 10% is a safe upper bound for WAL pod-local working set.
+    storage:
+      data: 1843Gi
+      wal: 205Gi
   resources:
     requests:
       cpu: 2

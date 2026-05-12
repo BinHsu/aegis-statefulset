@@ -28,9 +28,22 @@ stateful:
     # match existing per-tenant pod inventory).
     count: 1
 
-    # Storage allocated per pod (per ADR-02).
-    # POC small (20Gi); production 2Ti per ADR-02 spec default.
-    storage_per_pod: 20Gi
+    # Multi-PVC storage layout per ADR-02 (Path γ — modern K8s database
+    # operator pattern used by TiDB / K8ssandra / CloudNativePG operators).
+    # Two independent EBS volumes per pod:
+    #   - data: SSTable forest, dominant read + sequential-write workload
+    #   - wal:  write-ahead log, append-only sequential-write workload
+    # Independent CSI VolumeSnapshots; independent EBS IOPS budgets;
+    # no privileged init container, no Kyverno PolicyException needed
+    # (aligned with PSS restricted profile per ADR-07).
+    # Literal LVM init container (with thin pool + dual LV on a single
+    # EBS) available as opt-in patch in docs/future/lvm-init-patch.md
+    # for operational profiles that prefer single-volume + LVM thin snap.
+    storage:
+      # POC: data 18Gi + wal 2Gi ≈ 20Gi total (chaos demo scale)
+      # Production: data 1843Gi + wal 205Gi ≈ 2Ti total (10% WAL ratio)
+      data: 18Gi
+      wal: 2Gi
 
   # POC mock image — custom Go binary doing /data/<key> filesystem ops
   # (~30 lines, no real LevelDB). Build via scripts/build/build-stateful-mock.sh

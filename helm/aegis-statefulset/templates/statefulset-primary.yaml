@@ -178,9 +178,16 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
 
+          # Multi-PVC mounts per ADR-02 Path γ — `data` PVC for SSTable
+          # forest, `wal` PVC for write-ahead log. Two independent EBS
+          # volumes give independent IOPS budgets (LDB compaction stops
+          # contending with WAL fsync) without LVM init complexity.
+          # Both PVCs are CSI-snapshotted atomically per Velero schedule.
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: wal
+              mountPath: /wal
             - name: tmp
               mountPath: /tmp
 
@@ -245,14 +252,42 @@ spec:
         - name: tmp
           emptyDir: {}
 
+  # Multi-PVC volumeClaimTemplates per ADR-02 Path γ.
+  #   data — SSTable forest (90% of total provisioned storage)
+  #   wal  — write-ahead log (10% of total provisioned storage)
+  #
+  # Two PVCs ⇒ two EBS volumes ⇒ two independent IOPS budgets. Equivalent
+  # to LVM's WAL/data-LV separation without requiring a privileged init
+  # container or Kyverno PolicyException. Aligned with PSS restricted
+  # profile per ADR-07.
+  #
+  # Both PVCs use reclaimPolicy=Retain (from StorageClass per ADR-02),
+  # ensuring EBS volumes survive pod / cluster destruction. Velero
+  # snapshots both PVCs atomically (single Backup CR covers all PVCs in
+  # the included namespace).
+  #
+  # Literal-LVM alternative (single EBS + LVM thin pool + dual LV) is
+  # documented as opt-in patch in docs/future/lvm-init-patch.md.
   volumeClaimTemplates:
     - metadata:
         name: data
         labels:
           {{- include "aegis-statefulset.labels" . | nindent 10 }}
+          aegis.io/volume-role: data
       spec:
         accessModes: ["ReadWriteOnce"]
         storageClassName: {{ .Values.storage.storage_class }}
         resources:
           requests:
-            storage: {{ .Values.stateful.cells.storage_per_pod }}
+            storage: {{ .Values.stateful.cells.storage.data }}
+    - metadata:
+        name: wal
+        labels:
+          {{- include "aegis-statefulset.labels" . | nindent 10 }}
+          aegis.io/volume-role: wal
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.storage.storage_class }}
+        resources:
+          requests:
+            storage: {{ .Values.stateful.cells.storage.wal }}
