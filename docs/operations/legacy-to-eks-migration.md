@@ -225,11 +225,15 @@ Two default rules by source. Deviation patterns in [^10].
 | Source | Default cutover lever | Why |
 |---|---|---|
 | **AWS-hosted** (EC2 / ECS / existing K8s in AWS) | **ALB target group binding (TGB) weighted shift** | Same AWS control plane; TGB shift is seconds-reversible; WAF / Shield already in line; zero AWS egress |
-| **Non-AWS** (on-prem / other cloud / non-AWS K8s) | **Route 53 weighted DNS** | Zero network plumbing prerequisite; public IPs OK; TTL propagation delay is the only cost |
+| **Non-AWS** (on-prem / other cloud / non-AWS K8s) | **DNS / edge weighted routing** at whichever provider the customer already uses — Route 53, Cloudflare, NS1, Akamai, Google Cloud DNS, Azure Traffic Manager, Fastly, etc. | Zero network plumbing prerequisite; public IPs OK; TTL propagation delay is the only cost; concept is provider-agnostic |
 
-Cross-region AWS sources combine both: Route 53 latency routing as
-outer envelope to pick the region, ALB TGB as inner cutover lever
-within each region.
+Cross-region AWS sources combine both: DNS-layer routing (Route 53
+latency routing or equivalent) as outer envelope to pick the region;
+ALB TGB as inner cutover lever within each region.
+
+When the customer uses Cloudflare specifically, Workers (programmable
+edge scripts) unlock per-tenant routing at the edge — see Pattern E
+in [^10] for the case where this collapses Pattern B's extra hop.
 
 ### Pattern 4a — ALB TGB weighted shift (AWS source default)
 
@@ -244,15 +248,27 @@ Single ALB, two target groups (legacy + EKS). Phase shifts [^6]:
 
 L7 connection-drained shift — clients perceive zero connection break.
 
-### Pattern 4b — Route 53 weighted DNS (non-AWS source default)
+### Pattern 4b — DNS / edge weighted routing (non-AWS source default)
 
-Three-step timing:
+Three-step timing, provider-agnostic — exact API differs (Route 53
+`change-resource-record-sets`, Cloudflare Load Balancing pool weights,
+NS1 Filter Chain, Akamai Property Manager, etc.) but the timing
+discipline is the same:
 
 | Timing | Action | Why |
 |---|---|---|
 | One week before cutover | Drop record TTL 300 sec → 30 sec | Resolvers refresh once before cutover day; aggressive caches still cap at ~5 min [^7] |
-| Cutover day | Shift weight from legacy → new EKS ALB endpoint | Most clients propagate within 30 sec; 5-min "shadow serve" on legacy catches stragglers |
+| Cutover day | Shift weight from legacy origin → new EKS ALB endpoint | Most clients propagate within 30 sec; 5-min "shadow serve" on legacy catches stragglers |
 | One day after stable | Raise TTL back to 300 sec | Reduce DNS query load + resolver pressure |
+
+Provider-specific concrete CLI (replace per customer's actual stack):
+
+| Provider | API surface |
+|---|---|
+| AWS Route 53 | `aws route53 change-resource-record-sets --hosted-zone-id … --change-batch …` |
+| Cloudflare | `cloudflared` / API `POST /accounts/.../load_balancers/.../pools` with weighted origin pools; or Cloudflare Workers script for per-request routing [^10] |
+| NS1 | `ns1 record edit … --weight N` |
+| Akamai | Property Manager + Fast Purge for TTL flush |
 
 ### When to deviate from default — three triggers
 
@@ -472,26 +488,46 @@ needs; otherwise the default in the first table is correct.
     API Gateway in their stack, or needs the native canary deployment
     pattern.
 
+    **Pattern E — Cloudflare Workers edge per-tenant routing.** When
+    the customer already uses Cloudflare as their DNS / edge, Workers
+    (JavaScript scripts running at Cloudflare edge nodes) can dispatch
+    per-request based on tenant_id / cookie / header — same role as
+    the ADR-03 placement table but at the edge layer. This collapses
+    Pattern B's extra hop (no EKS reverse-proxy needed for the
+    per-tenant routing) AND keeps WAF / DDoS protection integrated at
+    the same plane. Trade-offs: Cloudflare-specific (lock-in to this
+    provider); Workers have CPU-time limits (~50 ms default,
+    extendable to 30 sec with paid plan) which constrains complex
+    routing logic; Cloudflare LB tier (Pro / Business) required for
+    weighted pools. Best fit: customer is already a Cloudflare
+    Enterprise / Business customer and the migration is "AWS-as-the-
+    destination, Cloudflare-as-the-front-door" — Workers script
+    becomes the per-tenant placement layer.
+
     **Decision matrix — when to pick which:**
 
-    | Trigger | Public IP only | DX/VPN available | Pick |
+    | Trigger | Customer's edge | Network prereq | Pick |
     |---|---|---|---|
-    | Per-tenant canary needed | Either | Either | **B** (placement table integration) |
-    | WAF/Shield in front during migration | Either | Either | B (most flexible) or D (simplest) |
-    | Seconds rollback only | Public IP only | No DX/VPN | B (Envoy upstream weight) or D |
-    | Seconds rollback only | RFC 1918 OK | DX/VPN exists | **C** (simplest, low latency) |
+    | Per-tenant canary needed | AWS-native or anything else | Any | **B** (EKS Envoy + placement table — ADR-03 path) |
+    | Per-tenant canary needed | **Cloudflare** | None | **E** (Workers edge script — skips EKS hop) |
+    | WAF / Shield in front during migration | AWS-native | Any | B (most flexible) or D (simplest) |
+    | WAF / DDoS in front during migration | **Cloudflare** | None | **E** (Cloudflare WAF is integrated) |
+    | Seconds rollback, public IP only | Any | No DX/VPN | B (Envoy weight) or D (API GW) |
+    | Seconds rollback, RFC 1918 OK | Any | DX/VPN exists | **C** (simplest, low latency) |
 
     **Setup time comparison for the deviation patterns:**
 
     | Pattern | Network prerequisite | Setup time |
     |---|---|---|
-    | B | None (can route via public internet) or DX/VPN | Days (Envoy config + EKS bring-up) |
-    | C | DX (weeks) or Site-to-Site VPN (~1 day) | ~1 day (after network plumbing) |
-    | D | None | Hours (API Gateway config) |
+    | B (ALB + EKS Envoy) | None (public internet OK) or DX/VPN | Days (Envoy config + EKS bring-up) |
+    | C (ALB IP target direct) | DX (weeks) or Site-to-Site VPN (~1 day) | ~1 day after network plumbing |
+    | D (API Gateway) | None | Hours (API Gateway config) |
+    | E (Cloudflare Workers) | None; customer already on Cloudflare | Hours (Worker script + Load Balancer pools) |
 
     The default rule (§ 4 first table) is right for ~80% of Mittelstand-
-    scale customers; the deviations cover the remaining 20% where one
-    of the three triggers fires.
+    scale customers. The five deviation patterns (B / C / D / E plus
+    plain DNS at non-Cloudflare providers) cover the remaining 20%
+    where one of the trigger conditions fires.
 
 ---
 
