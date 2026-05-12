@@ -423,7 +423,7 @@ both tags were touched). Useful evidence for the DR report's
 | Velero pods CrashLoopBackOff | IRSA role not attached | Check `aws_iam_role.velero` trust policy includes the EKS OIDC issuer URL |
 | `curl ALB` returns 503 | TGB not registering targets | `kubectl get tgb -A`; verify ALB controller logs; common cause = wrong target group ARN in values.yaml |
 | Phase 1 rotation script hangs at "waiting for AZ-B node group" | Node group desired=0 didn't scale | Check Karpenter logs; manually `aws eks update-nodegroup-config --desired=N` |
-| DLM cross-region copy not happening | Region pair not supported | Check `aws dlm get-lifecycle-policy`; falling back to `interval_unit=HOURS` is fine for POC |
+| Cross-region snapshot copy not landing in DR region | Velero VolumeSnapshotLocation misconfigured or BSL replication not enabled | Check `kubectl get volumesnapshotlocation -A` for the DR-tier VSL pointing at the DR region; verify the operational-schedule BSL has replication disabled and the DR-schedule BSL has it enabled (ADR-04 dual-cadence pattern). Note: AWS DLM is NOT used in this architecture — Velero VSL handles cross-region replication. |
 | Cost spiking past $100 | Forgot to teardown previous run | `terraform destroy` immediately; check `aws ec2 describe-volumes` for orphaned EBS |
 
 ---
