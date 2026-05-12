@@ -65,7 +65,7 @@ credentials.json
 # =============================================================
 node_modules/
 dist/
-build/
+/build/         # repo-root build/ only; NOT scripts/build/ which is real source
 *.log
 logs/
 
