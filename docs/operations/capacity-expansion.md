@@ -1,12 +1,6 @@
 # Capacity Expansion Runbook
 
-> **Status:** Runbook describes the intended operation; the supporting
-> script `scripts/capacity/expand-cell.sh` `[TODO]` and the cost-attribution
-> companion `docs/finops/cost-allocation.md` `[TODO]` are planned future
-> work, not yet implemented. The flow below stays valid as the operator's
-> mental model once the script lands.
-
-Operator runbook for `scripts/capacity/expand-cell.sh` `[TODO]` per ADR-01.
+Operator runbook for [`scripts/capacity/expand-cell.sh`](../../scripts/capacity/expand-cell.sh) per ADR-01.
 
 Capacity expansion is the response to **aggregate cluster pressure** —
 the cluster as a whole is approaching its onboarding ceiling, even if
@@ -63,7 +57,9 @@ expansion is effectively permanent.
 - check if the existing cells are actually full or if hot-pod
   relocation would suffice (relocation is free; cells aren't)
 - update the per-tenant cost allocation model to reflect the new
-  cell — see `docs/finops/cost-allocation.md` `[TODO]`
+  cell — re-tag the new cell's resources with the `Tier` / `Component`
+  / `CostCenter` values that match cell-scope cost-tracking
+  conventions (per ADR-10 + [`docs/finops/finops-discipline.md`](../finops/finops-discipline.md))
 
 ---
 
