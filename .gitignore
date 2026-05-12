@@ -92,3 +92,11 @@ venv/
 # (final artifact ships as docs/DR_report.pdf which is committed).
 # =============================================================
 chaos-evidence/
+
+# =============================================================
+# Submission PDFs — generated fresh via scripts/build/render-submission-pdfs.sh
+# from their canonical .md sources (1:1 .md ↔ .pdf mapping). Generated
+# at Thu morning per runbook 05; attached to submission email. Source-of-
+# truth is .md; PDFs are derived artifacts, not committed.
+# =============================================================
+docs/submission-pdfs/
