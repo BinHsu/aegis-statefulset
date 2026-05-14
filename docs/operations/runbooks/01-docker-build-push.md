@@ -110,10 +110,22 @@ aws ecr describe-repositories --repository-names aegis-stateful-mock \
 # (b) Use ephemeral DOCKER_CONFIG with pre-populated config.json for
 #     plaintext storage. Belt-and-suspenders defense.
 if [[ "$(uname)" == "Darwin" ]]; then
-    # docker-credential-osxkeychain stores credentials as INTERNET passwords,
-    # not generic passwords — use the right `security` subcommand. Loop in case
-    # multiple stale entries accumulated from prior failed attempts.
-    while security delete-internet-password -s "$ECR_REGISTRY" >/dev/null 2>&1; do :; done
+    # docker-credential-osxkeychain stores credentials as INTERNET passwords
+    # (not generic) — use the right `security` subcommand. The command itself
+    # doesn't accept wildcards for -s, so enumerate target hosts from
+    # ~/.docker/config.json `auths` keys (every registry we've ever logged
+    # into), then loop delete each. Account-scoped, region-agnostic.
+    targets=()
+    if [[ -f ~/.docker/config.json ]] && command -v jq >/dev/null 2>&1; then
+        while IFS= read -r host; do
+            [[ -n "$host" ]] && targets+=("$host")
+        done < <(jq -r '.auths // {} | keys[]' ~/.docker/config.json 2>/dev/null \
+                 | grep -E '\.dkr\.ecr\..*\.amazonaws\.com$')
+    fi
+    targets+=("$ECR_REGISTRY")  # always include current target as fallback
+    for host in "${targets[@]}"; do
+        while security delete-internet-password -s "$host" >/dev/null 2>&1; do :; done
+    done
 fi
 export DOCKER_CONFIG="$(mktemp -d -t aegis-docker-XXXXXX)"
 echo '{"auths": {}}' > "$DOCKER_CONFIG/config.json"
