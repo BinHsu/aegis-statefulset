@@ -1,20 +1,25 @@
 # Single-layer ALB across the three AZs (per ADR-03), TLS terminated at the edge
 # with ACM-issued certificate (per ADR-07).
 
-resource "aws_acm_certificate" "main" {
-  domain_name       = var.domain_name
-  validation_method = "DNS"
-
-  subject_alternative_names = ["*.${var.domain_name}"]
-
-  lifecycle {
-    create_before_destroy = true
-  }
-
-  tags = local.common_tags
-}
-
-# DNS validation record creation depends on Route 53 zone — see route53.tf when added.
+# ACM certificate disabled while route53.tf is also disabled (no DNS
+# zone in this account → DNS-01 validation can't complete, terraform
+# resource times out after 5min waiting for ISSUED state). Re-enable
+# in lockstep with route53.tf + a delegated hosted zone. The cert was
+# orphaned anyway — no aws_lb_listener references it (HTTPS listener
+# is wired up in production via a separate manifest, not in this POC).
+#
+# resource "aws_acm_certificate" "main" {
+#   domain_name       = var.domain_name
+#   validation_method = "DNS"
+#
+#   subject_alternative_names = ["*.${var.domain_name}"]
+#
+#   lifecycle {
+#     create_before_destroy = true
+#   }
+#
+#   tags = local.common_tags
+# }
 
 resource "aws_lb" "main" {
   name               = "aegis-statefulset-${var.environment}"

@@ -33,10 +33,7 @@ resource "aws_eks_node_group" "stateful_master" {
   node_role_arn   = aws_iam_role.node_group.arn
 
   # CRITICAL: only the master AZ subnet — single failure domain per ADR-01.
-  subnet_ids = [
-    for s in module.vpc.private_subnets :
-    s if data.aws_subnet.private[s].availability_zone == var.master_az
-  ]
+  subnet_ids = [local.private_subnet_by_az[var.master_az]]
 
   instance_types = var.stateful_node_instance_types
   capacity_type  = "ON_DEMAND"
@@ -85,10 +82,7 @@ resource "aws_eks_node_group" "stateful_standby" {
   node_group_name = "stateful-standby-${each.value}"
   node_role_arn   = aws_iam_role.node_group.arn
 
-  subnet_ids = [
-    for s in module.vpc.private_subnets :
-    s if data.aws_subnet.private[s].availability_zone == each.value
-  ]
+  subnet_ids = [local.private_subnet_by_az[each.value]]
 
   instance_types = var.stateful_node_instance_types
   capacity_type  = "ON_DEMAND"
@@ -136,10 +130,7 @@ resource "aws_eks_node_group" "stateless_master" {
   node_group_name = "stateless-master-${var.master_az}"
   node_role_arn   = aws_iam_role.node_group.arn
 
-  subnet_ids = [
-    for s in module.vpc.private_subnets :
-    s if data.aws_subnet.private[s].availability_zone == var.master_az
-  ]
+  subnet_ids = [local.private_subnet_by_az[var.master_az]]
 
   instance_types = var.stateless_node_instance_types
   capacity_type  = "ON_DEMAND"
@@ -175,10 +166,7 @@ resource "aws_eks_node_group" "stateless_standby" {
   node_group_name = "stateless-standby-${each.value}"
   node_role_arn   = aws_iam_role.node_group.arn
 
-  subnet_ids = [
-    for s in module.vpc.private_subnets :
-    s if data.aws_subnet.private[s].availability_zone == each.value
-  ]
+  subnet_ids = [local.private_subnet_by_az[each.value]]
 
   instance_types = var.stateless_node_instance_types
   capacity_type  = "ON_DEMAND"
@@ -204,13 +192,9 @@ resource "aws_eks_node_group" "stateless_standby" {
 }
 
 # --------------------------------------------------------------------
-# Shared subnet metadata + node IAM role
+# Node IAM role (subnet AZ mapping moved to local.private_subnet_by_az
+# in main.tf — see comment there)
 # --------------------------------------------------------------------
-data "aws_subnet" "private" {
-  for_each = toset(module.vpc.private_subnets)
-  id       = each.value
-}
-
 resource "aws_iam_role" "node_group" {
   name = "${local.cluster_name}-node-group-role"
 

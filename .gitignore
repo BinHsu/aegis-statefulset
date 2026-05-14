@@ -18,6 +18,10 @@ _context/
 *.tfstate.*
 *.tfvars
 *.auto.tfvars
+# Saved plan output from `terraform plan -out=tfplan` — operator-local,
+# regenerated on every apply; do not commit (binary, may contain secrets).
+tfplan
+*.tfplan
 crash.log
 crash.*.log
 override.tf

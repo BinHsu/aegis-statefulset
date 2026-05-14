@@ -3,6 +3,20 @@ resource "aws_eks_cluster" "main" {
   role_arn = aws_iam_role.cluster.arn
   version  = var.kubernetes_version
 
+  # API_AND_CONFIG_MAP required by EKS Access Entries. The Karpenter
+  # module creates an aws_eks_access_entry for its node role; with the
+  # legacy CONFIG_MAP-only mode that resource type is rejected with
+  # "authentication mode must be set to one of [API, API_AND_CONFIG_MAP]".
+  #
+  # bootstrap_cluster_creator_admin_permissions MUST be explicit:
+  # toggling this from true → null (the block default) is a forces-replace
+  # attribute on aws_eks_cluster. Keep it true to match how the cluster
+  # was created and avoid an unnecessary replacement on re-apply.
+  access_config {
+    authentication_mode                         = "API_AND_CONFIG_MAP"
+    bootstrap_cluster_creator_admin_permissions = true
+  }
+
   vpc_config {
     subnet_ids              = module.vpc.private_subnets
     endpoint_private_access = true

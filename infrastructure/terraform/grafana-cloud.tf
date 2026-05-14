@@ -33,9 +33,29 @@ provider "grafana" {
 resource "grafana_cloud_stack" "main" {
   provider = grafana.cloud
 
-  name        = "aegis-statefulset-${var.environment}"
-  slug        = "aegis-statefulset-${var.environment}"
-  region_slug = "eu"
+  # Reusing the existing "aegis" stack rather than creating a new one —
+  # the operator's Grafana Cloud free tier permits one stack per org.
+  # Name + slug match the existing instance so terraform-import lines up.
+  name        = "aegis.grafana.net"
+  slug        = "aegis"
+  # Imported state stores the internal cluster slug (prod-eu-west-2)
+  # rather than the user-facing region slug ("eu") because Grafana's
+  # read-path returns the cluster identifier. Pin to match state.
+  # Stack creation via terraform from scratch can still use "eu"; this
+  # value matters only after a stack is imported.
+  region_slug = "prod-eu-west-2"
+
+  # Stack was created via Grafana UI — state shows description=null.
+  # Don't fight UI ownership of cosmetic fields; let operator manage
+  # name/description/labels through Grafana Cloud directly. Terraform
+  # manages structure (datasources, dashboards, folder), not chrome.
+  lifecycle {
+    ignore_changes = [
+      region_slug,
+      description,
+      labels,
+    ]
+  }
 
   description = "Observability stack for aegis-statefulset (${var.environment})"
 }
@@ -105,18 +125,21 @@ resource "grafana_folder" "main" {
   title = "aegis-statefulset"
 }
 
-# Seven dashboards per ADR-06. JSON files live next to this file in
-# dashboards/. Adding a dashboard is a one-line append to local.dashboards
-# plus the JSON file — no extra TF resource required.
+# Eight default dashboards per ADR-06 + README (7 SRE + 1 FinOps).
+# Canonical JSON source lives in gitops/grafana/dashboards/ (the GitOps
+# source-of-truth), consumed here at apply time. Adding a dashboard is a
+# one-line append to local.dashboards plus the JSON file — no extra TF
+# resource required.
 locals {
   dashboards = [
-    "service-health",
-    "customer-drill-down",
-    "pod-detail",
-    "cell-capacity",
-    "backup-pipeline",
-    "ha-status",
-    "migration-progress",
+    "service-availability",
+    "k8s-platform-health",
+    "per-tenant-ops",
+    "capacity-headroom",
+    "dr-readiness",
+    "backup-health",
+    "security-audit",
+    "finops-overview",
   ]
 }
 
@@ -126,7 +149,7 @@ resource "grafana_dashboard" "default" {
   for_each = toset(local.dashboards)
 
   folder      = grafana_folder.main.id
-  config_json = file("${path.module}/dashboards/${each.value}.json")
+  config_json = file("${path.module}/../../gitops/grafana/dashboards/${each.value}.json")
 }
 
 output "grafana_stack_url" {

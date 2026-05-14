@@ -40,6 +40,19 @@ resource "helm_release" "aws_load_balancer_controller" {
     value = aws_eks_cluster.main.name
   }
 
+  # Bypass IMDSv2 introspection. EKS managed node groups default to
+  # IMDSv2 hop-limit=1, but a pod calling IMDS via containerd takes
+  # 2 hops (pod → host → IMDS), so the metadata fetch returns 401.
+  # Passing region + vpcId explicitly avoids the metadata round-trip.
+  set {
+    name  = "region"
+    value = var.aws_region
+  }
+  set {
+    name  = "vpcId"
+    value = module.vpc.vpc_id
+  }
+
   set {
     name  = "serviceAccount.name"
     value = "aws-load-balancer-controller"
@@ -105,6 +118,18 @@ resource "helm_release" "velero" {
   version          = "5.2.0" # TODO ADR-09: pin to chart digest
   namespace        = "velero"
   create_namespace = true
+
+  # Skip the upgradeCRDs init Job. Default kubectl image
+  # docker.io/bitnami/kubectl:1.30 no longer exists on Docker Hub
+  # (Bitnami switched to full-semver tag schema). CRDs are still
+  # installed via the chart's regular templates, just without the
+  # post-upgrade migration hook. Re-enable + pin to an existing tag
+  # (e.g. docker.io/bitnami/kubectl:1.30.6) when the velero chart
+  # is bumped to a version where this hook is needed.
+  set {
+    name  = "upgradeCRDs"
+    value = "false"
+  }
 
   set {
     name  = "credentials.useSecret"
@@ -217,7 +242,11 @@ resource "helm_release" "karpenter" {
   name             = "karpenter"
   repository       = "oci://public.ecr.aws/karpenter"
   chart            = "karpenter"
-  version          = "v0.34.4" # TODO ADR-09: pin to chart digest
+  # v0.34.4 dropped from ECR public. Pinned to the last v0.x line to
+  # avoid the v1.x CRD migration (karpenter.sh/v1alpha5 → v1) which
+  # requires manifest rewrites in NodePool / EC2NodeClass elsewhere.
+  # Bump to v1.x when those CRDs are updated together.
+  version          = "v0.37.0" # TODO ADR-09: pin to chart digest
   namespace        = "karpenter"
   create_namespace = true
 

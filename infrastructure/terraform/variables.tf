@@ -35,7 +35,11 @@ variable "vpc_cidr" {
 variable "kubernetes_version" {
   description = "EKS cluster Kubernetes version"
   type        = string
-  default     = "1.29"
+  # EKS only allows sequential minor upgrades (1.29→1.30, then 1.30→1.31).
+  # When bumping from a cluster that's already created, step one version
+  # at a time to keep the upgrade in-place. Fresh clusters can start at
+  # the latest supported version directly.
+  default     = "1.30"
 }
 
 variable "stateful_node_instance_types" {

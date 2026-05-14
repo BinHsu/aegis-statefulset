@@ -33,6 +33,13 @@ locals {
   cluster_name = "aegis-statefulset-${var.environment}"
   azs          = slice(data.aws_availability_zones.available.names, 0, var.az_count)
 
+  # AZ → private subnet ID. The terraform-aws-modules/vpc module places
+  # private_subnets[i] in azs[i] deterministically (see vpc.tf:17). This
+  # map's KEYS are plan-time-known (local.azs is); VALUES become known at
+  # apply, which terraform handles fine in locals. Replaces a data source
+  # whose for_each set wasn't known until apply.
+  private_subnet_by_az = { for i, az in local.azs : az => module.vpc.private_subnets[i] }
+
   common_tags = {
     Project     = "aegis-statefulset"
     Environment = var.environment
