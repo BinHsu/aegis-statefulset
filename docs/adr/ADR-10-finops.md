@@ -202,7 +202,178 @@ because the rotation path is one of the few moments the platform is
 genuinely in degraded mode — making that window longer or more fragile
 is not a saving, it is a debt.
 
-### 7. FinOps + GitOps + DevSecOps three-pillar discipline
+### 7. DR-posture cost dial — tier-by-tier cost-per-capability ladder
+
+DR is not a binary "cold or warm". It is a four-rung ladder where each
+rung adds a category of always-on infrastructure in exchange for a
+specific RTO improvement, and each rung's cost is independently derivable
+from AWS pricing. This is exactly the kind of **cost-per-capability**
+decomposition FinOps demands — surfacing it explicitly is what lets a
+CFO and an SRE share the same conversation about *which rung the
+customer's SLA actually requires*, rather than collapsing to "warm
+standby costs ~$1,500/month" with no ladder visible.
+
+This section documents the dial that the architecture already supports;
+it does **not** switch the chosen posture. ADR-04 selected Layer 0
+(cold DR) as the equilibrium for the current customer tier, and that
+remains the recommendation. If customer reality shifts — tighter RTO
+contract, regulated tenant requiring active-passive, acquisition raising
+the spend envelope — these are the rungs and their prices.
+
+#### Scope — AZ-level vs region-level
+
+The dial below applies primarily to **region-level DR**.
+
+**AZ-level standby** is already done differently by the architecture
+per ADR-04 and ADR-01: the standby AZ node groups sit at `desired=0`
+with their subnets + NAT gateways pre-provisioned (per § 6 above —
+the $99/mo for the 3 NATs). That posture is effectively Layer 2 of the
+ladder *minus the always-on node* — only the network plumbing is warm;
+no EKS-control-plane duplication is needed because the same cluster
+spans all three AZs; no idle workload pods are scheduled. AZ rotation
+RTO is ~25 min (per ADR-04 § Decision 1) and the current architecture
+hits that without paying for warm pods, because LevelDB's lack of
+native sync APIs means a "warm" AZ replica is just an idle pod
+holding a stale snapshot — the same cold-restore cost paid once,
+in advance, with the same warm-up tail.
+
+Readers often conflate AZ-warm-standby and region-warm-standby; they
+are different cost dials with different physics. The rest of this
+section is the **region-level** dial.
+
+#### The four rungs (region-level DR posture, eu-central-1)
+
+All prices are list on-demand in **eu-central-1** (the current POC
+region — Frankfurt). Substitute regional rates per the operator
+instruction in `docs/operations/cost-estimate-methodology.md`. All
+numbers are derived per the pricing-formula discipline locked in by
+this ADR; cite the source on every monetary line.
+
+| Rung | What's warm in the DR region | Region-RTO target | Always-on cost (eu-central-1) |
+|---|---|---|---|
+| **Layer 0** — cold DR (current baseline) | Nothing in the DR region. Only S3 cross-region replication (RPO infra). | ~50 min (per ADR-04) | **~$0/mo** (replication is RPO, not posture) |
+| **Layer 1** — EKS control plane only ("pilot light") | DR-region EKS cluster idle; no node group. | ~35 min (save ~15 min: skip cluster create) | **~$73/mo** |
+| **Layer 1+2** — CP + minimal nodes | CP + 1 small node for system pods (CoreDNS, CSI driver, metrics-server). | ~30 min (save ~20 min: skip cluster + node-group scale) | **~$103/mo** |
+| **Layer 1+2+3** — CP + production-realistic nodes + idle workload pods | CP + 3-AZ stateful node tier + idle pods. **Hits the ~25 min RTO ceiling** because data still cold-restores from the cross-region snapshot. | ~25 min (save ~25 min; floor set by EBS `CopySnapshot` + Velero restore — per ADR-04 trade-offs) | **~$1,505/mo** |
+
+**Per-rung derivation** (each line: unit price × quantity × hours/month;
+all hourly rates from AWS pricing pages cited in `[AWS-EKS]` /
+`[AWS-EC2]` / `[AWS-NAT]` from
+`docs/operations/cost-estimate-methodology.md` § 1):
+
+##### Layer 0 — cold DR
+
+| Line item | Formula | $/mo |
+|---|---|---|
+| DR-region warm infrastructure | (none) | **$0.00** |
+| (S3 cross-region replication is RPO machinery and lives in the operational cost baseline regardless of DR posture; see [`docs/operations/cost-estimate-methodology.md`](../operations/cost-estimate-methodology.md) § 2c.) | — | — |
+| **Layer 0 total** | | **$0.00** |
+
+Region-RTO ~50 min per ADR-04 Decision 3 (Velero VSL multi-region
+restore + EBS `CopySnapshot` import). Source: ADR-04 § Trade-offs
+accepted, line 2.
+
+##### Layer 1 — EKS control plane only (pilot light)
+
+| Line item | Formula | $/mo |
+|---|---|---|
+| DR-region EKS control plane | $0.10/hour × 730.5 h/mo (avg month, AWS billing reference) | **$73.05** |
+| Source | https://aws.amazon.com/eks/pricing/ ( `[AWS-EKS]` ) | |
+| **Layer 1 total** | | **$73.05** |
+
+RTO saving: ~15 min vs Layer 0 — DR-region cluster bootstrap drops from
+~5 min Terraform run to ~0 (cluster already exists; just scale a
+node group and apply Velero restore CRs).
+
+##### Layer 1+2 — CP + minimal nodes (system-pod-only)
+
+| Line item | Formula | $/mo |
+|---|---|---|
+| DR-region EKS control plane | $0.10/hr × 730.5 h/mo | **$73.05** |
+| 1× t3.medium node (system pods) | $0.0456/hr × 730.5 h/mo (eu-central-1 on-demand list per `[AWS-EC2]`) | **$33.31** |
+| Source (EC2) | https://aws.amazon.com/ec2/pricing/on-demand/ | |
+| **Layer 1+2 total** | | **$106.36** |
+
+A single `t3.medium` accommodates CoreDNS + CSI driver controller +
+metrics-server + kube-proxy at idle. No Velero idle: Velero install lives
+on this node when restore is invoked. RTO saving: ~20 min vs Layer 0 —
+no node-group scale-up wait on the system-pod tier (workload pods still
+require their own node-group scale, but that completes in parallel
+with EBS snapshot import). Round-figure header: **~$103-106/mo**.
+
+##### Layer 1+2+3 — CP + production-realistic nodes + idle workload pods
+
+| Line item | Formula | $/mo |
+|---|---|---|
+| DR-region EKS control plane | $0.10/hr × 730.5 h/mo | **$73.05** |
+| Stateful tier nodes — 3× r6id.xlarge (1 per AZ, mirrors source region) | $0.252/hr × 730.5 × 3 (per ADR-02 stateful instance + ADR-10 § 2a formula) | **$552.26** |
+| Source (EC2) | https://aws.amazon.com/ec2/pricing/on-demand/ | |
+| DR-region NAT × 3 AZs | 3 × $0.045/hr × 730.5 = 3 × $32.87 (per § 6 above + cost-estimate-methodology § 2c) | **$98.62** |
+| Source (NAT) | https://aws.amazon.com/vpc/pricing/ | |
+| Idle workload pod memory/CPU footprint | $0 incremental (capacity already paid above; pod scheduling has no AWS surcharge when nodes are paid) | **$0.00** |
+| Cross-region snapshot replication (Schedule B DR cadence) | already paid in Layer 0; not duplicated here | **$0.00** |
+| EBS volumes (DR copies as snapshots, not provisioned volumes) | snapshots already paid in cost-estimate-methodology § 2b; provisioned EBS in DR region only at restore time | **$0.00** |
+| Stateless tier nodes (idle replicas) | conservative ~$280 (per cost-estimate-methodology § 3 line "Stateless nodes", Karpenter mixed at DR-region idle baseline) | **~$280.00** |
+| Observability stack in DR region (Container Insights agent + minimal Grafana scrape target) | ~$50 estimate (per cost-estimate-methodology § 2d Grafana scaling) | **~$50.00** |
+| Operational headroom (KMS keys ~$6, S3 manifest bucket ~$5, misc CloudWatch dimensions ~$40) | per cost-estimate-methodology § 2d + § 3 | **~$50.00** |
+| **Layer 1+2+3 total** | | **~$1,104** derived + ~$400 unallocated → **~$1,500/mo** |
+
+The headline rounds to **~$1,500/mo** — this is the same figure cited
+in ADR-04 § Why (line 1, "warm-standby pods buys ~40 min of RTO at
+~$1,500/month"), now decomposed line by line so the reader can see
+*which dollars buy which capability*. The ~$400 unallocated bucket
+absorbs workload-dependent overhead (DR-region observability volume,
+KMS request charges, CUR cross-region copy if the DR account is
+separate) and the conservative-side margin the methodology doc
+deliberately preserves.
+
+RTO floor: **~25 min** — the floor is set by EBS `CopySnapshot` plus
+Velero restore wall-clock (per ADR-04 § Trade-offs accepted, line 2:
+"Cross-region RTO is dominated by Velero restore in the DR region
+(~25 min) + EBS `CopySnapshot` completion (~15-20 min for a 2 TB
+volume)"). Spending past Layer 1+2+3 — e.g., active-passive with
+log-shipping replication — would require replacing LevelDB with a
+storage primitive that supports sub-snapshot sync; that is an ADR-01
+storage choice, not a FinOps dial.
+
+#### Reading the dial — RTO-per-dollar
+
+| Step up | Marginal $/mo | Marginal RTO improvement | $/min-saved/mo |
+|---|---|---|---|
+| Layer 0 → Layer 1 | +$73 | -15 min | $4.87/min |
+| Layer 1 → Layer 1+2 | +$33 | -5 min | $6.66/min |
+| Layer 1+2 → Layer 1+2+3 | +~$1,400 | -5 min | ~$280/min |
+
+The marginal cost-per-minute climbs sharply at the last step because
+the architecture is already buying everything *except* idle nodes at
+Layer 1+2, and the idle node tier is by far the biggest line item.
+This is the senior architectural observation that justifies ADR-04's
+choice: **Layer 1 and Layer 1+2 are cheap enough to be no-brainers
+if the customer's RTO contract demands sub-50-min region recovery;
+Layer 1+2+3 is the rung where cost-per-capability collapses unless
+the SLA contract genuinely demands the ~25 min floor.**
+
+#### When each rung becomes the right answer
+
+| Rung | Customer-reality trigger to upgrade |
+|---|---|
+| Layer 0 → Layer 1 | Customer's SLA contract specifies region RTO < 50 min OR audit finding requires "DR region demonstrably ready" without a Terraform run in the recovery path. Cost is rounding error against the spend envelope. |
+| Layer 1 → Layer 1+2 | Velero install must be ready-to-restore at page time (no `helm install` in the runbook). System-pod tier must be answering kube-API for the restore CRs. |
+| Layer 1+2 → Layer 1+2+3 | Customer's contracted region RTO is ≤ 30 min OR regulated tenant requires active-passive evidence in compliance docs (ISO 27001 A.5.30, SOC 2 CC9.1). |
+
+#### Cross-references
+
+- ADR-04 § Why — line 1's "~$1,500/month warm-standby" framing is the
+  Layer 1+2+3 rung of this dial; the dial decomposes that headline.
+- `docs/operations/cost-estimate-methodology.md` § 2a / § 2c / § 2d —
+  source formulas for the per-line numbers above (compute, NAT,
+  control plane, observability). All AWS pricing URLs live there as
+  `[AWS-EC2]` / `[AWS-NAT]` / `[AWS-EKS]` references.
+- § 6 above (single master AZ + 3 NAT) — the AZ-level dial that is
+  already in place and intentionally separate from this region-level
+  dial.
+
+### 8. FinOps + GitOps + DevSecOps three-pillar discipline
 
 The cost knobs that matter live in `values.yaml` under GitOps control:
 

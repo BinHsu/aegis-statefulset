@@ -127,10 +127,42 @@ two standby AZ node groups at `desired=0` (zero nodes, only the ASG
 exists).
 
 ```bash
-aws eks update-kubeconfig --name aegis-poc --region eu-central-1
+# Point kubectl at the EKS cluster. Use the full cluster name as the
+# alias (NOT a short `aegis`) so the context is unambiguous in
+# operator kubeconfigs that already hold contexts from sibling
+# aegis-* repos (e.g. aegis-enclave). Same discipline as the AWS
+# resource naming rule: independent infra → full repo-name prefix.
+ENV="${ENVIRONMENT:-staging}"
+aws eks update-kubeconfig \
+  --name "aegis-statefulset-${ENV}" \
+  --region eu-central-1 \
+  --alias "aegis-statefulset-${ENV}"
+
+# CRITICAL: verify kubectl is actually pointing at EKS, not at a local
+# cluster (OrbStack / Docker Desktop / minikube / kind / k3d). Any of
+# these can be your current-context and `kubectl get nodes` will
+# silently return their local node list, making it look like the EKS
+# cluster is broken. Switch context explicitly, then confirm.
+kubectl config use-context "aegis-statefulset-${ENV}"
+kubectl config current-context
+# expect: aegis-statefulset-staging  (not docker-desktop / orbstack / minikube / kind-*)
+
 kubectl get nodes -L topology.kubernetes.io/zone
 # expect: 1-3 nodes labelled eu-central-1a; nothing in -1b or -1c
 ```
+
+> **Forker trap — local Kubernetes contexts shadow EKS.** If you have
+> Docker Desktop, OrbStack, minikube, kind, k3d, or a previous EKS
+> cluster installed, `kubectl` defaults to whichever context was set
+> last. Every `kubectl` / `helm` command in this runbook silently runs
+> against the wrong cluster — you'll see "everything fine" or
+> "everything missing" on the wrong cluster, then waste an hour
+> debugging the right cluster's nonexistent problem. The
+> `kubectl config use-context aegis` + `current-context` verify
+> pair above is the only reliable defence. **Terraform-helm provider
+> uses its own auth via `aws eks get-token` and is NOT affected by
+> kubectl context — it always hits EKS** — so terraform may succeed
+> while your manual `kubectl get pods` looks empty.
 
 ### Stage C — Cluster controllers (Helm releases via terraform)
 
