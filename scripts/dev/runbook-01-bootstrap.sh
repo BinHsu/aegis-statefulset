@@ -264,7 +264,10 @@ yq -i ".envoy.image.digest = \"${ENVOY_DIGEST}\"" "$VALUES"
 # inconsistency worth refactoring post-submission). Use a regex sed
 # that matches either the TODO placeholder OR any existing sha256:hex64
 # digest, so re-runs with a new digest update cleanly.
-sed_inplace -E "s|prom/blackbox-exporter:${BLACKBOX_TAG}@sha256:(TODO_VERIFY_FROM_DOCKER_HUB|[A-Fa-f0-9]{64})|prom/blackbox-exporter:${BLACKBOX_TAG}@${BLACKBOX_DIGEST}|" "$BLACKBOX_TEMPLATE"
+# Delimiter must NOT be `|` because the alternation inside the pattern
+# also uses `|` — BSD sed (macOS) treats the first `|` as the end of
+# the search pattern. Use `#` as delimiter instead.
+sed_inplace -E "s#prom/blackbox-exporter:${BLACKBOX_TAG}@sha256:(TODO_VERIFY_FROM_DOCKER_HUB|[A-Fa-f0-9]{64})#prom/blackbox-exporter:${BLACKBOX_TAG}@${BLACKBOX_DIGEST}#" "$BLACKBOX_TEMPLATE"
 
 echo "  ✅ patched values.yaml 3 image blocks + templates/blackbox-exporter.yaml"
 
