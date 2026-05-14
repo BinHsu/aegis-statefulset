@@ -116,10 +116,16 @@ if ! aws ecr describe-repositories --repository-names aegis-stateful-mock \
         --repository-name aegis-stateful-mock \
         --image-scanning-configuration scanOnPush=true \
         --image-tag-mutability IMMUTABLE \
+        --tags Key=Project,Value=aegis-statefulset Key=ManagedBy,Value=terraform \
         --region "$AWS_REGION" >/dev/null
-    echo "  ✅ created ECR repo aegis-stateful-mock"
+    echo "  ✅ created ECR repo aegis-stateful-mock (tagged for teardown discovery)"
 else
-    echo "  ℹ️  ECR repo aegis-stateful-mock already exists"
+    # Idempotent: tag existing repo too (in case it was created before this fix)
+    aws ecr tag-resource \
+        --resource-arn "arn:aws:ecr:${AWS_REGION}:${AWS_ACCOUNT_ID}:repository/aegis-stateful-mock" \
+        --tags Key=Project,Value=aegis-statefulset Key=ManagedBy,Value=terraform \
+        --region "$AWS_REGION" >/dev/null 2>&1 || true
+    echo "  ℹ️  ECR repo aegis-stateful-mock already exists (tags ensured)"
 fi
 
 # Docker login — two-layer defense against macOS Keychain conflicts:
