@@ -100,12 +100,18 @@ aws ecr describe-repositories --repository-names aegis-stateful-mock \
        --image-tag-mutability IMMUTABLE \
        --region "$AWS_REGION"
 
-# Authenticate Docker daemon to ECR — via ephemeral DOCKER_CONFIG
-# (bypasses macOS Keychain / Linux keyring / Windows Credential Manager so
-# the auth state is OS-agnostic, CI-friendly, and won't conflict with stale
-# credential-helper entries). Pre-populate empty config.json — on some
-# Docker CLI builds, an empty temp dir still triggers the system helper;
-# writing {} forces plaintext storage in this file.
+# Authenticate Docker daemon to ECR — two-layer defense:
+#
+# (a) On macOS, pre-clear any stale Keychain entry for this registry.
+#     OrbStack / Docker Desktop inherits global ~/.docker/config.json
+#     credsStore="osxkeychain" even when --config $tmpdir is passed, so a
+#     prior failed login can leave a stale entry that blocks re-login with
+#     "The specified item already exists in the keychain. (-25299)".
+# (b) Use ephemeral DOCKER_CONFIG with pre-populated config.json for
+#     plaintext storage. Belt-and-suspenders defense.
+if [[ "$(uname)" == "Darwin" ]]; then
+    security delete-generic-password -s "$ECR_REGISTRY" >/dev/null 2>&1 || true
+fi
 export DOCKER_CONFIG="$(mktemp -d -t aegis-docker-XXXXXX)"
 echo '{"auths": {}}' > "$DOCKER_CONFIG/config.json"
 aws ecr get-login-password --region "$AWS_REGION" \
