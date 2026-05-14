@@ -173,8 +173,18 @@ aws ecr get-login-password --region "$AWS_REGION" \
 docker tag "aegis-stateful-mock:${STATEFUL_TAG}" \
     "${ECR_REGISTRY}/aegis-stateful-mock:${STATEFUL_TAG}"
 
-if docker --config "$DOCKER_CONFIG" manifest inspect "${ECR_REGISTRY}/aegis-stateful-mock:${STATEFUL_TAG}" >/dev/null 2>&1; then
-    echo "  ℹ️  ${STATEFUL_TAG} already pushed to ECR — fetching existing digest"
+# Use AWS ECR API to check "already pushed" — `docker manifest inspect` is
+# unreliable here because BuildKit creates a new attestation manifest on
+# every build (even with all layers cached), so the locally-tagged image
+# has a different manifest list digest than what's in ECR. On some Docker
+# CLI builds (OrbStack) this causes manifest inspect to mis-report the
+# tag's existence, leading to a redundant push that hits IMMUTABLE tag
+# protection. AWS ECR API is the authoritative check.
+if aws ecr describe-images \
+        --repository-name aegis-stateful-mock \
+        --image-ids "imageTag=${STATEFUL_TAG}" \
+        --region "$AWS_REGION" >/dev/null 2>&1; then
+    echo "  ℹ️  ${STATEFUL_TAG} already in ECR — skipping push (tag is IMMUTABLE)"
 else
     docker --config "$DOCKER_CONFIG" push "${ECR_REGISTRY}/aegis-stateful-mock:${STATEFUL_TAG}"
     echo "  ✅ pushed mock to ECR"
