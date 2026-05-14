@@ -1,6 +1,6 @@
 # Disaster Recovery Report
 
-> **Template usage:** this file is the source of `DR_report.pdf`. Run
+> **Template usage:** this file is the source of `docs/submission-pdfs/03_DR_Demo_Report.pdf`. Run
 > `scripts/dr-report/generate-dr-report.sh` after the chaos demo finishes
 > — it substitutes the `{{PLACEHOLDER}}` values from the `chaos-evidence/`
 > directory (where automatable) and renders to PDF via Chrome headless.

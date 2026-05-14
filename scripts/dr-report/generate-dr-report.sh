@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # scripts/dr-report/generate-dr-report.sh
 #
-# Render docs/operations/dr-report-template.md into docs/DR_report.pdf.
+# Render docs/operations/dr-report-template.md into
+# docs/submission-pdfs/03_DR_Demo_Report.pdf (the canonical submission PDF).
 #
 # Auto-fills the placeholders that can be derived without operator input
 # (date, git SHA, region, cluster name, etc.) AND inlines the cost-summary
@@ -14,7 +15,7 @@
 #   2) Run capture-evidence.sh at each checkpoint
 #   3) Run capture-demo-cost.sh after teardown
 #   4) Hand-edit dr-report-template.md (or a copy) to fill the [fill in] markers
-#   5) Run this script — outputs docs/DR_report.pdf
+#   5) Run this script — outputs docs/submission-pdfs/03_DR_Demo_Report.pdf
 #
 # Why pandoc: already on Bin's machine (verified at session start),
 # produces clean PDFs from markdown with a single command. Chrome
@@ -34,7 +35,7 @@
 #   OPERATOR         default $(whoami)
 #   TEMPLATE_PATH    default docs/operations/dr-report-template.md
 #   EVIDENCE_DIR     default chaos-evidence
-#   OUTPUT_PDF       default docs/DR_report.pdf
+#   OUTPUT_PDF       default docs/submission-pdfs/03_DR_Demo_Report.pdf
 #   OUTPUT_MD        default chaos-evidence/DR_report.md (the filled-in markdown)
 
 set -euo pipefail
@@ -47,7 +48,7 @@ STANDBY_AZS="${STANDBY_AZS:-eu-central-1b, eu-central-1c}"
 OPERATOR="${OPERATOR:-$(whoami)}"
 TEMPLATE_PATH="${TEMPLATE_PATH:-docs/operations/dr-report-template.md}"
 EVIDENCE_DIR="${EVIDENCE_DIR:-chaos-evidence}"
-OUTPUT_PDF="${OUTPUT_PDF:-docs/DR_report.pdf}"
+OUTPUT_PDF="${OUTPUT_PDF:-docs/submission-pdfs/03_DR_Demo_Report.pdf}"
 OUTPUT_MD="${OUTPUT_MD:-${EVIDENCE_DIR}/DR_report.md}"
 
 log() {

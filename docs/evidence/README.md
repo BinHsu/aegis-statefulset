@@ -6,7 +6,7 @@ repo; the table below maps evidence → claim → reproduction path.
 
 ## Start here
 
-**`DR_REPORT.md`** ([PDF: `DR_REPORT.pdf`](./DR_REPORT.pdf)) is the
+**`DR_REPORT.md`** (PDF: [`03_DR_Demo_Report.pdf`](../submission-pdfs/03_DR_Demo_Report.pdf)) is the
 narrative wrapper for everything in this directory — what hypothesis
 each artefact tests, what was actually run today vs documented for
 later, and a per-file provenance table mapping each PNG / JSON / log

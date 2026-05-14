@@ -106,12 +106,19 @@ chaos-evidence/
 scripts/dev/runbook-config.yaml
 
 # =============================================================
-# Submission PDFs — generated fresh via scripts/build/render-submission-pdfs.sh
-# from their canonical .md sources (1:1 .md ↔ .pdf mapping). Generated
-# at Thu morning per runbook 05; attached to submission email. Source-of-
-# truth is .md; PDFs are derived artifacts, not committed.
+# Submission PDFs — canonical artefacts attached to the submission
+# email AND committed for GitHub browseability (reviewer who clones
+# the repo gets the same PDFs without needing the render toolchain).
+# The .md sources remain the editable source of truth; the .pdf
+# artefacts are regenerated whenever the .md changes (via
+# scripts/build/render-submission-pdfs.sh + render-markdown-pdf-chrome.sh
+# for SVG-heavy sources) and re-committed.
+#
+# Intermediate / experimental renders live under intermediate/ and
+# stay gitignored. Only the numbered 00-04 canonical PDFs are tracked.
 # =============================================================
-docs/submission-pdfs/
+docs/submission-pdfs/intermediate/
+docs/submission-pdfs/*.tmp.pdf
 
 # =============================================================
 # Terraform state backend config (generated from
