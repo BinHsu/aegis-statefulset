@@ -44,15 +44,34 @@
 
 set -u  # NOT set -e — sourced; failure shouldn't kill the shell
 
-# Detect sourced vs executed
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    echo "ERROR: this script must be sourced, not executed." >&2
-    echo "  Run:   source ${BASH_SOURCE[0]}" >&2
-    echo "  NOT:   bash   ${BASH_SOURCE[0]}" >&2
-    exit 1
+# Detect sourced vs executed (cross-shell: bash + zsh)
+# bash: $BASH_SOURCE[0] != $0 when sourced
+# zsh:  $ZSH_EVAL_CONTEXT contains 'file' when sourced
+if [[ -n "${BASH_VERSION:-}" ]]; then
+    if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+        echo "ERROR: this script must be sourced, not executed." >&2
+        echo "  Run:   source ${BASH_SOURCE[0]}" >&2
+        echo "  NOT:   bash   ${BASH_SOURCE[0]}" >&2
+        exit 1
+    fi
+    _SCRIPT_PATH="${BASH_SOURCE[0]}"
+elif [[ -n "${ZSH_VERSION:-}" ]]; then
+    case "${ZSH_EVAL_CONTEXT:-}" in
+        *:file*) : ;; # sourced — proceed
+        *)
+            echo "ERROR: this script must be sourced, not executed." >&2
+            echo "  Run:   source $0" >&2
+            exit 1
+            ;;
+    esac
+    # In zsh, $0 inside a sourced file IS the file path
+    _SCRIPT_PATH="${0}"
+else
+    echo "ERROR: unsupported shell. Requires bash 4+ or zsh 5+." >&2
+    return 1 2>/dev/null || exit 1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$_SCRIPT_PATH")" && pwd)"
 PROJ_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # ============================================================================

@@ -24,15 +24,28 @@
 # MUST be sourced (not executed) — exports temp credentials into the
 # calling shell.
 
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    echo "ERROR: this script must be sourced, not executed." >&2
-    echo "  Run:   source ${BASH_SOURCE[0]}" >&2
-    exit 1
+# Detect sourced vs executed (cross-shell: bash + zsh)
+if [[ -n "${BASH_VERSION:-}" ]]; then
+    if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+        echo "ERROR: this script must be sourced, not executed." >&2
+        echo "  Run:   source ${BASH_SOURCE[0]}" >&2
+        exit 1
+    fi
+    _SCRIPT_PATH="${BASH_SOURCE[0]}"
+elif [[ -n "${ZSH_VERSION:-}" ]]; then
+    case "${ZSH_EVAL_CONTEXT:-}" in
+        *:file*) : ;;
+        *) echo "ERROR: this script must be sourced, not executed." >&2; exit 1 ;;
+    esac
+    _SCRIPT_PATH="${0}"
+else
+    echo "ERROR: unsupported shell (need bash 4+ or zsh 5+)." >&2
+    return 1 2>/dev/null || exit 1
 fi
 
 set -u
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$_SCRIPT_PATH")" && pwd)"
 PROJ_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # ============================================================================
