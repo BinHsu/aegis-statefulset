@@ -170,7 +170,11 @@ output "cache_invalidator_role_arn" {
 # Used by the helm_release in cluster-controllers.tf. Trust pinned to
 # kube-system:aws-load-balancer-controller.
 resource "aws_iam_role" "alb_controller" {
-  name = "aegis-alb-controller-${var.environment}"
+  # Full project prefix `aegis-statefulset-` rather than short `aegis-` —
+  # `aegis-` collides with sibling repos in shared accounts (LDZ owns
+  # its own aegis-* resources). See aegis-aws-landing-zone issue #54
+  # for the platform-side naming conventions this aligns with.
+  name = "aegis-statefulset-alb-controller-${var.environment}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -232,7 +236,15 @@ resource "aws_iam_role_policy" "alb_controller" {
 # instance-profile + node IAM. This role is the *controller* SA role,
 # annotated on the karpenter:karpenter ServiceAccount in cluster-controllers.tf.
 resource "aws_iam_role" "karpenter" {
-  name = "aegis-karpenter-${var.environment}"
+  # Two naming requirements stack here:
+  # (1) Full project prefix `aegis-statefulset-` (avoid LDZ collision —
+  #     see aegis-aws-landing-zone issue #54)
+  # (2) Suffix `-karpenter-controller` — matches the org's SCP
+  #     `DenyIamPrivilegeEscalation` exemption pattern
+  #     `arn:aws:iam::*:role/*-karpenter-controller` so this role can
+  #     be CREATED by any principal (not just ControlTowerExecution /
+  #     gh-tf-*). Standard convention from terraform-aws-modules/eks.
+  name = "aegis-statefulset-karpenter-controller-${var.environment}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
