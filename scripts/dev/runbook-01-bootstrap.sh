@@ -162,6 +162,8 @@ fi
 export DOCKER_CONFIG
 DOCKER_CONFIG="$(mktemp -d -t aegis-docker-XXXXXX)"
 echo '{"auths": {}}' > "$DOCKER_CONFIG/config.json"
+# shellcheck disable=SC2064  # $DOCKER_CONFIG path is set right above
+# and immutable after; expanding-now is intentional + correct here.
 trap "rm -rf '$DOCKER_CONFIG' 2>/dev/null || true" EXIT
 echo "  ℹ️  using ephemeral DOCKER_CONFIG (plaintext, no Keychain)"
 
