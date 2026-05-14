@@ -110,7 +110,10 @@ aws ecr describe-repositories --repository-names aegis-stateful-mock \
 # (b) Use ephemeral DOCKER_CONFIG with pre-populated config.json for
 #     plaintext storage. Belt-and-suspenders defense.
 if [[ "$(uname)" == "Darwin" ]]; then
-    security delete-generic-password -s "$ECR_REGISTRY" >/dev/null 2>&1 || true
+    # docker-credential-osxkeychain stores credentials as INTERNET passwords,
+    # not generic passwords — use the right `security` subcommand. Loop in case
+    # multiple stale entries accumulated from prior failed attempts.
+    while security delete-internet-password -s "$ECR_REGISTRY" >/dev/null 2>&1; do :; done
 fi
 export DOCKER_CONFIG="$(mktemp -d -t aegis-docker-XXXXXX)"
 echo '{"auths": {}}' > "$DOCKER_CONFIG/config.json"
