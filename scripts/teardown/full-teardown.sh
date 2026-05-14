@@ -427,6 +427,33 @@ else
   log "  (no S3 buckets matched both tags via Resource Groups API)"
 fi
 
+# ─── Phase 5b: ECR repository cleanup ───────────────────────────────────
+# ECR repo is created by scripts/dev/runbook-01-bootstrap.sh (outside
+# terraform scope). MUST be cleaned to (a) avoid storage cost
+# accumulation and (b) free the IMMUTABLE tag v0.1.0 for the next demo.
+# Safety: account ID was verified in Layer 1; we target the exact repo
+# name `aegis-stateful-mock` only — no fuzzy match.
+
+log ""
+log "─── Phase 5b/7: ECR repository cleanup ───"
+
+ECR_REPO="aegis-stateful-mock"
+if aws ecr describe-repositories --repository-names "${ECR_REPO}" \
+       --region "${AWS_REGION}" >/dev/null 2>&1; then
+    IMG_COUNT=$(aws ecr describe-images --repository-name "${ECR_REPO}" \
+        --region "${AWS_REGION}" --query 'length(imageDetails)' --output text 2>/dev/null || echo 0)
+    if [ -n "${FORCE}" ]; then
+        log "  Deleting ECR repo '${ECR_REPO}' + ${IMG_COUNT} image(s)"
+        run aws ecr delete-repository --repository-name "${ECR_REPO}" \
+            --region "${AWS_REGION}" --force
+        log "  ✓ ECR repo deleted"
+    else
+        log "  DRY-RUN: would delete ECR repo '${ECR_REPO}' (${IMG_COUNT} image(s))"
+    fi
+else
+    log "  (no ECR repo '${ECR_REPO}' found — skipping)"
+fi
+
 # ─── Phase 6: terraform destroy ─────────────────────────────────────────
 
 log ""
