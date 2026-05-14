@@ -94,6 +94,14 @@ venv/
 chaos-evidence/
 
 # =============================================================
+# Runbook config — working copy generated from .example by
+# scripts/dev/runbook-00-bootstrap.sh. The .example is canonical
+# committed; the working file allows forker / operator local
+# customisation without polluting the repo.
+# =============================================================
+scripts/dev/runbook-config.yaml
+
+# =============================================================
 # Submission PDFs — generated fresh via scripts/build/render-submission-pdfs.sh
 # from their canonical .md sources (1:1 .md ↔ .pdf mapping). Generated
 # at Thu morning per runbook 05; attached to submission email. Source-of-

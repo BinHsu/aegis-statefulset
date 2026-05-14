@@ -55,6 +55,24 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJ_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
+# ============================================================================
+# Bootstrap runbook-config.yaml from .example if missing
+# ============================================================================
+# Pattern parallels terraform.tfvars.example → terraform.tfvars:
+# the .example file is canonical (committed); the working file is
+# gitignored so forker / operator can customise without polluting
+# the repo. Idempotent — if working file exists, leaves it alone.
+RUNBOOK_CONFIG_EXAMPLE="$SCRIPT_DIR/runbook-config.yaml.example"
+RUNBOOK_CONFIG="$SCRIPT_DIR/runbook-config.yaml"
+if [[ ! -f "$RUNBOOK_CONFIG" ]]; then
+    if [[ ! -f "$RUNBOOK_CONFIG_EXAMPLE" ]]; then
+        echo "  ❌ Neither $RUNBOOK_CONFIG nor $RUNBOOK_CONFIG_EXAMPLE exists" >&2
+        return 1 2>/dev/null || exit 1
+    fi
+    cp "$RUNBOOK_CONFIG_EXAMPLE" "$RUNBOOK_CONFIG"
+    echo "  ℹ️  copied runbook-config.yaml.example → runbook-config.yaml (working copy)"
+fi
+
 # Optional values with defaults
 FINOPS_ALERT_EMAIL="${FINOPS_ALERT_EMAIL:-}"
 TFVARS_ENVIRONMENT="${TFVARS_ENVIRONMENT:-staging}"
