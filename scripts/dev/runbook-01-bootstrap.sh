@@ -180,9 +180,16 @@ else
     echo "  ✅ pushed mock to ECR"
 fi
 
-STATEFUL_DIGEST=$(docker inspect \
-    "${ECR_REGISTRY}/aegis-stateful-mock:${STATEFUL_TAG}" \
-    --format='{{index .RepoDigests 0}}' | cut -d@ -f2)
+# Fetch digest from ECR directly — source-of-truth. Local docker inspect can
+# return a stale or newly-built (unpushed) manifest digest because BuildKit
+# adds a new attestation manifest on every build even when content is cached,
+# so the local RepoDigests entry can diverge from what's actually in ECR.
+STATEFUL_DIGEST=$(aws ecr describe-images \
+    --repository-name aegis-stateful-mock \
+    --image-ids "imageTag=${STATEFUL_TAG}" \
+    --region "$AWS_REGION" \
+    --query 'imageDetails[0].imageDigest' \
+    --output text)
 echo "  stateful: $STATEFUL_DIGEST"
 
 # ============================================================================
@@ -241,11 +248,13 @@ fi
 # Final verification — no TODO placeholders left in active code (FROM lines
 # in Dockerfile + values.yaml + blackbox-exporter template). Excludes
 # comments which may legitimately mention placeholder names.
+# Wrap each grep in (cmd || true) so zero-match (correct state!) doesn't
+# trigger pipefail and abort the script before the summary prints.
 SEARCH_ACTIVE=("$VALUES" "$BLACKBOX_TEMPLATE")
-REMAINING_ACTIVE=$(grep -E "TODO_FILL_REAL_DIGEST|TODO_VERIFY_FROM_DOCKER_HUB" \
-    "${SEARCH_ACTIVE[@]}" 2>/dev/null | wc -l | tr -d ' ')
-REMAINING_DOCKERFILE=$(grep -E "^FROM.*TODO_(FILL_REAL_DIGEST|VERIFY_FROM_DOCKER_HUB)" \
-    "$DOCKERFILE" 2>/dev/null | wc -l | tr -d ' ')
+REMAINING_ACTIVE=$( ( grep -E "TODO_FILL_REAL_DIGEST|TODO_VERIFY_FROM_DOCKER_HUB" \
+    "${SEARCH_ACTIVE[@]}" 2>/dev/null || true ) | wc -l | tr -d ' ')
+REMAINING_DOCKERFILE=$( ( grep -E "^FROM.*TODO_(FILL_REAL_DIGEST|VERIFY_FROM_DOCKER_HUB)" \
+    "$DOCKERFILE" 2>/dev/null || true ) | wc -l | tr -d ' ')
 REMAINING=$((REMAINING_ACTIVE + REMAINING_DOCKERFILE))
 
 echo
