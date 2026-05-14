@@ -231,6 +231,13 @@ The Three-Layer DR model (ADR-04) decouples these:
 
 Each layer recovers a different failure class without contention.
 
+**Live demonstration:** Layer 1 (pod identity → PV re-attach) verified
+end-to-end on the staging cluster — see `docs/evidence/` for the
+chaos-drill log (`scripts/chaos/demo-stateful-pod-kill.sh`, pod kill
+to Ready in ~65 s with both EBS volumes re-attached) and the
+CloudWatch corroboration (audit log events + per-volume IO metrics
+from the AWS side).
+
 ---
 
 ## 7. Cost summary
@@ -252,6 +259,13 @@ Cost knobs:
 - Loosen cadence 5-min → 1h → save ~$200/mo, RPO worsens to ~30 min.
 - Reduce to 1 NAT Gateway → save ~$66/mo, lose warm-standby rotation readiness.
 - Add cells per ADR-05 migration → ~$700/mo per cell (node + EBS).
+- **DR-posture cost dial — see ADR-10 § 7.** The "warm standby
+  ~$1,500/mo" alternative to cold DR breaks into a four-rung
+  cost-per-capability ladder (Layer 0 cold / Layer 1 control-plane
+  only / Layer 1+2 with minimal nodes / Layer 1+2+3 full warm), each
+  rung with derivation, AWS pricing citation, and marginal $/min
+  saved. The dial is the lever the customer moves if the RTO
+  tolerance shifts — without rearchitecting.
 
 > **All cost figures derive from formulas in `docs/operations/cost-estimate-methodology.md`**
 > — AWS pricing pages cited per line, methodology spelled out per component.
@@ -410,6 +424,7 @@ shape choice — the architecture supports each item without re-shaping.
 |---|---|
 | The whole picture | `README.md` and this file |
 | Why each architectural decision | `_context/adr/` (50 private predecessors of the public 10) |
+| DR-posture cost dial (FinOps tier ladder) | `docs/adr/ADR-10-finops.md` § 7 |
 | Why cold DR over active-passive multi-region | `docs/operations/why-cold-dr.md` |
 | Disaster runbook | `docs/operations/region-failure-recovery.md` |
 | Ownership boundaries | `docs/operations/scope-boundaries.md` |
@@ -417,6 +432,7 @@ shape choice — the architecture supports each item without re-shaping.
 | Architectural assumptions | `docs/architecture-assumptions.md` |
 | Mock app implementation | `app/main.go` |
 | Chaos demo scripts | `scripts/chaos/` |
+| **Chaos demo + AWS observability evidence pack** | `docs/evidence/` (chaos log + Grafana screenshots + CloudWatch JSON/PNG) |
 | Helm chart | `helm/aegis-statefulset/` |
 | Terraform | `infrastructure/terraform/` |
 
