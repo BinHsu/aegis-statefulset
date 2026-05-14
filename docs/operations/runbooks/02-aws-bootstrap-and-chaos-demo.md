@@ -78,11 +78,26 @@ export TF_VAR_grafana_cloud_token="grl_..."
 Wave 4 introduces ordering constraints that are easy to miss. Apply in
 **five stages** to avoid circular dependencies on first run.
 
+### Stage 0 — Terraform state backend (one-time per AWS account)
+
+The main composition uses an S3 remote backend with native locking
+(`use_lockfile = true`). Provision it via the bootstrap module first;
+skip on subsequent demos against the same account. Full detail in
+[`infrastructure/terraform/bootstrap/README.md`](../../../infrastructure/terraform/bootstrap/README.md).
+
+```bash
+cd infrastructure/terraform/bootstrap
+terraform init && terraform apply
+terraform output -raw backend_hcl_template > ../backend.hcl
+cd ..
+terraform init -backend-config=backend.hcl
+# expect: ~1 min (bootstrap) + backend re-init
+```
+
 ### Stage A — VPC, IAM, KMS (no compute)
 
 ```bash
-cd infrastructure/terraform
-terraform init
+# (working dir: infrastructure/terraform — already init'd above)
 terraform apply \
   -target=module.vpc \
   -target=aws_iam_role.eks_cluster \

@@ -37,7 +37,6 @@ terraform apply
 terraform output -raw backend_hcl_template > ../backend.hcl
 terraform output
 #   tfstate_bucket = "aegis-statefulset-tfstate-staging-251774439261"
-#   tflock_table   = "aegis-statefulset-tflock-staging"
 #   region         = "eu-central-1"
 
 # 3. Initialise the main composition with the new backend
@@ -55,15 +54,14 @@ the bootstrap output above).
 
 ## Re-running
 
-Re-running `terraform apply` is safe — both resources have
-`prevent_destroy = true` lifecycle blocks. No-op if already provisioned.
+Re-running `terraform apply` is safe — the S3 bucket has
+`prevent_destroy = true`. No-op if already provisioned.
 
 ## Teardown
 
 The state backend deliberately resists teardown:
-- S3 bucket has `prevent_destroy = true` — manually empty + edit terraform
-  to remove the lifecycle block before `terraform destroy`
-- DynamoDB table has `prevent_destroy = true` — same pattern
+- S3 bucket has `prevent_destroy = true` — manually empty (all versions)
+  + edit terraform to remove the lifecycle block before `terraform destroy`
 
 `scripts/teardown/full-teardown.sh` does NOT touch the bootstrap module
 for this reason — the state backend outlives any specific demo run, and

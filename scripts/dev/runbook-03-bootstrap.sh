@@ -5,7 +5,9 @@
 # for the GitHub Actions ↔ AWS OIDC trust path:
 #   1. IAM OIDC provider (token.actions.githubusercontent.com) — detect + reuse if present
 #   2. Trust policy + IAM role (aegis-statefulset-gha-ci)
-#   3. aegis-statefulset-ci-plan-only inline policy (read-mostly + tf state R/W)
+#   3. aegis-statefulset-ci-plan-only inline policy (read-mostly + S3 tf
+#      state R/W; locking via S3 native locking `use_lockfile = true`,
+#      terraform 1.10+ S3 conditional writes — no DynamoDB table needed)
 #   4. Capture + echo the role ARN
 #   5. Set GitHub repo variables (AWS_ROLE_ARN, AWS_REGION, AWS_ACCOUNT_ID)
 #
@@ -228,25 +230,39 @@ EOF
 
 if aws iam get-role --profile "$AWS_PROFILE" --role-name "$ROLE_NAME" >/dev/null 2>&1; then
     echo "  ℹ️  role $ROLE_NAME already exists — updating trust policy (idempotent)"
-    if ! aws iam update-assume-role-policy \
+    if ! AWS_ERR=$(aws iam update-assume-role-policy \
             --profile "$AWS_PROFILE" \
             --role-name "$ROLE_NAME" \
-            --policy-document "file://${TRUST_POLICY}" >/dev/null 2>&1; then
-        echo "  ❌ Failed to update assume-role policy on $ROLE_NAME." >&2
-        echo "     Check iam:UpdateAssumeRolePolicy permission." >&2
+            --policy-document "file://${TRUST_POLICY}" 2>&1 >/dev/null); then
+        echo "  ❌ Failed to update assume-role policy on $ROLE_NAME:" >&2
+        echo "$AWS_ERR" | sed 's/^/     /' >&2
+        echo "     Common causes: iam:UpdateAssumeRolePolicy denied at permission-set level," >&2
+        echo "                    or organisation SCP blocks IAM mutations on this account." >&2
         exit 1
     fi
     echo "  ✅ trust policy refreshed (sub=repo:${GITHUB_REPO}:*)"
 else
-    if ! aws iam create-role \
+    if ! AWS_ERR=$(aws iam create-role \
             --profile "$AWS_PROFILE" \
             --role-name "$ROLE_NAME" \
             --assume-role-policy-document "file://${TRUST_POLICY}" \
             --description "GitHub Actions CI for aegis-statefulset (managed by runbook-03-bootstrap.sh)" \
             --tags "Key=${PROJECT_TAG_KEY},Value=${PROJECT_TAG_VAL}" "Key=${MANAGEDBY_TAG_KEY},Value=${MANAGEDBY_TAG_VAL}" \
-            >/dev/null 2>&1; then
-        echo "  ❌ Failed to create role $ROLE_NAME." >&2
-        echo "     Check iam:CreateRole + iam:TagRole permission." >&2
+            2>&1 >/dev/null); then
+        echo "  ❌ Failed to create role $ROLE_NAME:" >&2
+        echo "$AWS_ERR" | sed 's/^/     /' >&2
+        echo "" >&2
+        echo "  Common causes:" >&2
+        echo "  - Organisation SCP explicit-denies iam:CreateRole on this account" >&2
+        echo "    (look for 'explicit deny in a service control policy' in the error above)" >&2
+        echo "  - Permission set lacks iam:CreateRole or iam:TagRole" >&2
+        echo "  - Trust policy malformed (check the JSON above)" >&2
+        echo "" >&2
+        echo "  Workarounds when SCP blocks IAM mutation:" >&2
+        echo "  - Have an org admin pre-create the role + attach inline policy manually" >&2
+        echo "  - Use a different AWS account where the SCP does not apply" >&2
+        echo "  - Skip GHA OIDC for this environment (CI workflows will be non-functional" >&2
+        echo "    until role exists, but architecture / chaos demo are unaffected)" >&2
         exit 1
     fi
     echo "  ✅ created role $ROLE_NAME"
@@ -275,8 +291,6 @@ cat > "$CI_POLICY" <<EOF
         "s3:GetObject",
         "kms:Describe*",
         "kms:List*",
-        "dynamodb:Describe*",
-        "dynamodb:List*",
         "logs:Describe*",
         "route53:Get*",
         "route53:List*"
@@ -292,16 +306,6 @@ cat > "$CI_POLICY" <<EOF
         "s3:DeleteObject"
       ],
       "Resource": "arn:aws:s3:::${TF_STATE_BUCKET}/*"
-    },
-    {
-      "Sid": "TerraformStateLockTable",
-      "Effect": "Allow",
-      "Action": [
-        "dynamodb:GetItem",
-        "dynamodb:PutItem",
-        "dynamodb:DeleteItem"
-      ],
-      "Resource": "arn:aws:dynamodb:*:${AWS_ACCOUNT_ID}:table/terraform-state-lock"
     }
   ]
 }

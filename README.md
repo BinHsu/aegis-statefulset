@@ -45,9 +45,16 @@ invariant across customer profiles — only `values.yaml` configuration moves.
 # Prerequisites
 #   aws CLI configured, terraform >= 1.6, helm >= 3.13, kubectl >= 1.28
 
-# 1. Provision AWS infrastructure
-cd infrastructure/terraform
-terraform init && terraform plan -out=tfplan && terraform apply tfplan
+# 1a. One-time per AWS account: provision the terraform state backend
+#     (S3 bucket with native locking). See infrastructure/terraform/bootstrap/README.md
+cd infrastructure/terraform/bootstrap
+terraform init && terraform apply
+terraform output -raw backend_hcl_template > ../backend.hcl
+cd ..
+
+# 1b. Provision AWS infrastructure (main composition)
+terraform init -backend-config=backend.hcl
+terraform plan -out=tfplan && terraform apply tfplan
 
 # 2. Configure kubeconfig
 aws eks update-kubeconfig --name aegis-statefulset-prod --region eu-central-1

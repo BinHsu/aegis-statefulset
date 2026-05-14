@@ -129,8 +129,6 @@ infrastructure:
         "s3:GetObject",
         "kms:Describe*",
         "kms:List*",
-        "dynamodb:Describe*",
-        "dynamodb:List*",
         "logs:Describe*",
         "route53:Get*",
         "route53:List*"
@@ -146,20 +144,15 @@ infrastructure:
         "s3:DeleteObject"
       ],
       "Resource": "arn:aws:s3:::YOUR_TF_STATE_BUCKET/*"
-    },
-    {
-      "Sid": "TerraformStateLockTable",
-      "Effect": "Allow",
-      "Action": [
-        "dynamodb:GetItem",
-        "dynamodb:PutItem",
-        "dynamodb:DeleteItem"
-      ],
-      "Resource": "arn:aws:dynamodb:*:ACCOUNT_ID:table/terraform-state-lock"
     }
   ]
 }
 ```
+
+**Note on state locking:** State locking uses S3 native locking
+(`use_lockfile = true`, terraform 1.10+ S3 conditional writes via
+`If-None-Match`) — no DynamoDB table is required, so no
+`dynamodb:*` grants on `terraform-state-lock` appear in this policy.
 
 ```bash
 aws iam put-role-policy \
