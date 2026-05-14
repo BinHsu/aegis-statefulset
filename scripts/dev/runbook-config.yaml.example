@@ -22,13 +22,11 @@ project:
   # Project name is the canonical prefix for ALL AWS resources created
   # outside of terraform (ECR repos, IAM roles, IAM inline policies, etc.)
   # Inside terraform, the `var.environment` + module conventions handle naming.
-
 # ============================================================================
 # ECR / image registry — runbook 01 (Docker build + push + digest)
 # ============================================================================
 ecr:
-  repository: aegis-statefulset-mock     # full-prefix; was `aegis-stateful-mock`
-
+  repository: aegis-statefulset-mock # full-prefix; was `aegis-stateful-mock`
 images:
   stateful_mock:
     tag: v0.1.0
@@ -41,21 +39,18 @@ images:
     tag: v1.30.0
   blackbox_exporter:
     tag: v0.25.0
-
 # ============================================================================
 # IAM / OIDC — runbook 03 (GHA OIDC trust)
 # ============================================================================
 iam:
-  role_name: aegis-statefulset-gha-ci
-  policy_name: aegis-statefulset-ci-plan-only
-
+  role_name: aegis-gha-ci
+  policy_name: aegis-gha-ci-plan-only
 oidc:
   github_url: https://token.actions.githubusercontent.com
   audience: sts.amazonaws.com
   # GitHub Actions OIDC root-CA thumbprint. AWS auto-resolves now but the
   # create-open-id-connect-provider API still requires a value.
   thumbprint: 6938fd4d98bab03faadb97b34396831e3780aea1
-
 # ============================================================================
 # Tagging — required pair for teardown 4-layer safety discovery
 # ============================================================================
