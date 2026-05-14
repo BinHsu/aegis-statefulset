@@ -49,13 +49,30 @@ if ! [[ "$AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
 fi
 
 # ============================================================================
-# Tag / version pins
+# Shared config (sourced from runbook-config.yaml — single source of truth
+# for ECR repo name, image tags, distroless base, tag-pair values)
+# ============================================================================
+CONFIG_FILE="${PROJ_ROOT}/scripts/dev/runbook-config.yaml"
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    echo "ERROR: $CONFIG_FILE not found — required for shared resource naming" >&2
+    exit 1
+fi
+ECR_REPO=$(yq '.ecr.repository' "$CONFIG_FILE")
+STATEFUL_TAG=$(yq '.images.stateful_mock.tag' "$CONFIG_FILE")
+NGINX_TAG=$(yq '.images.nginx.tag' "$CONFIG_FILE")
+ENVOY_TAG=$(yq '.images.envoy.tag' "$CONFIG_FILE")
+BLACKBOX_TAG=$(yq '.images.blackbox_exporter.tag' "$CONFIG_FILE")
+DISTROLESS_IMAGE=$(yq '.images.distroless_base.repository' "$CONFIG_FILE")
+DISTROLESS_VARIANT=$(yq '.images.distroless_base.variant' "$CONFIG_FILE")
+PROJECT_TAG_KEY=$(yq '.tags.project.key' "$CONFIG_FILE")
+PROJECT_TAG_VAL=$(yq '.tags.project.value' "$CONFIG_FILE")
+MANAGEDBY_TAG_KEY=$(yq '.tags.managed_by.key' "$CONFIG_FILE")
+MANAGEDBY_TAG_VAL=$(yq '.tags.managed_by.value' "$CONFIG_FILE")
+
+# ============================================================================
+# Derived constants
 # ============================================================================
 ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-STATEFUL_TAG="v0.1.0"
-NGINX_TAG="1.27.0"
-ENVOY_TAG="v1.30.0"
-BLACKBOX_TAG="v0.25.0"
 
 DOCKERFILE="$PROJ_ROOT/app/Dockerfile"
 VALUES="$PROJ_ROOT/helm/aegis-statefulset/values.yaml"
@@ -73,8 +90,8 @@ sed_inplace() {
 # ============================================================================
 echo "=== Step 1/7: Resolve distroless base digest ==="
 # ============================================================================
-docker pull gcr.io/distroless/static:nonroot
-DISTROLESS_DIGEST=$(docker inspect gcr.io/distroless/static:nonroot \
+docker pull "${DISTROLESS_IMAGE}:${DISTROLESS_VARIANT}"
+DISTROLESS_DIGEST=$(docker inspect "${DISTROLESS_IMAGE}:${DISTROLESS_VARIANT}" \
   --format='{{index .RepoDigests 0}}' | cut -d@ -f2)
 echo "  distroless: $DISTROLESS_DIGEST"
 
@@ -82,24 +99,24 @@ echo "  distroless: $DISTROLESS_DIGEST"
 echo
 echo "=== Step 2/7: Patch app/Dockerfile ==="
 # ============================================================================
-if grep -q "FROM gcr.io/distroless/static@sha256:TODO_VERIFY_FROM_DOCKER_HUB" "$DOCKERFILE"; then
-    sed_inplace "s|gcr.io/distroless/static@sha256:TODO_VERIFY_FROM_DOCKER_HUB|gcr.io/distroless/static@${DISTROLESS_DIGEST}|" "$DOCKERFILE"
+if grep -q "FROM ${DISTROLESS_IMAGE}@sha256:TODO_VERIFY_FROM_DOCKER_HUB" "$DOCKERFILE"; then
+    sed_inplace "s|${DISTROLESS_IMAGE}@sha256:TODO_VERIFY_FROM_DOCKER_HUB|${DISTROLESS_IMAGE}@${DISTROLESS_DIGEST}|" "$DOCKERFILE"
     echo "  ✅ patched Dockerfile distroless digest"
 else
     echo "  ℹ️  Dockerfile FROM already has a real digest — skipping"
 fi
-grep "^FROM gcr.io/distroless" "$DOCKERFILE"
+grep "^FROM ${DISTROLESS_IMAGE}" "$DOCKERFILE"
 
 # ============================================================================
 echo
 echo "=== Step 3/7: docker build --platform linux/amd64 ==="
 # ============================================================================
 docker build --platform linux/amd64 \
-    -t "aegis-stateful-mock:${STATEFUL_TAG}" \
+    -t "${ECR_REPO}:${STATEFUL_TAG}" \
     -f "$DOCKERFILE" \
     "$PROJ_ROOT/app"
 
-IMG_SIZE_MB=$(docker inspect "aegis-stateful-mock:${STATEFUL_TAG}" \
+IMG_SIZE_MB=$(docker inspect "${ECR_REPO}:${STATEFUL_TAG}" \
     --format='{{.Size}}' | awk '{printf "%.1f", $1/1024/1024}')
 echo "  ✅ build OK, size: ${IMG_SIZE_MB} MB"
 if (( $(echo "$IMG_SIZE_MB > 20" | bc -l 2>/dev/null || echo 0) )); then
@@ -110,22 +127,22 @@ fi
 echo
 echo "=== Step 4/7: ECR repo + login + push ==="
 # ============================================================================
-if ! aws ecr describe-repositories --repository-names aegis-stateful-mock \
+if ! aws ecr describe-repositories --repository-names "${ECR_REPO}" \
         --region "$AWS_REGION" >/dev/null 2>&1; then
     aws ecr create-repository \
-        --repository-name aegis-stateful-mock \
+        --repository-name "${ECR_REPO}" \
         --image-scanning-configuration scanOnPush=true \
         --image-tag-mutability IMMUTABLE \
-        --tags Key=Project,Value=aegis-statefulset Key=ManagedBy,Value=terraform \
+        --tags "Key=${PROJECT_TAG_KEY},Value=${PROJECT_TAG_VAL}" "Key=${MANAGEDBY_TAG_KEY},Value=${MANAGEDBY_TAG_VAL}" \
         --region "$AWS_REGION" >/dev/null
-    echo "  ✅ created ECR repo aegis-stateful-mock (tagged for teardown discovery)"
+    echo "  ✅ created ECR repo ${ECR_REPO} (tagged for teardown discovery)"
 else
     # Idempotent: tag existing repo too (in case it was created before this fix)
     aws ecr tag-resource \
-        --resource-arn "arn:aws:ecr:${AWS_REGION}:${AWS_ACCOUNT_ID}:repository/aegis-stateful-mock" \
-        --tags Key=Project,Value=aegis-statefulset Key=ManagedBy,Value=terraform \
+        --resource-arn "arn:aws:ecr:${AWS_REGION}:${AWS_ACCOUNT_ID}:repository/${ECR_REPO}" \
+        --tags "Key=${PROJECT_TAG_KEY},Value=${PROJECT_TAG_VAL}" "Key=${MANAGEDBY_TAG_KEY},Value=${MANAGEDBY_TAG_VAL}" \
         --region "$AWS_REGION" >/dev/null 2>&1 || true
-    echo "  ℹ️  ECR repo aegis-stateful-mock already exists (tags ensured)"
+    echo "  ℹ️  ECR repo ${ECR_REPO} already exists (tags ensured)"
 fi
 
 # Docker login — two-layer defense against macOS Keychain conflicts:
@@ -176,8 +193,8 @@ echo "  ℹ️  using ephemeral DOCKER_CONFIG (plaintext, no Keychain)"
 aws ecr get-login-password --region "$AWS_REGION" \
   | docker --config "$DOCKER_CONFIG" login --username AWS --password-stdin "$ECR_REGISTRY"
 
-docker tag "aegis-stateful-mock:${STATEFUL_TAG}" \
-    "${ECR_REGISTRY}/aegis-stateful-mock:${STATEFUL_TAG}"
+docker tag "${ECR_REPO}:${STATEFUL_TAG}" \
+    "${ECR_REGISTRY}/${ECR_REPO}:${STATEFUL_TAG}"
 
 # Use AWS ECR API to check "already pushed" — `docker manifest inspect` is
 # unreliable here because BuildKit creates a new attestation manifest on
@@ -187,12 +204,12 @@ docker tag "aegis-stateful-mock:${STATEFUL_TAG}" \
 # tag's existence, leading to a redundant push that hits IMMUTABLE tag
 # protection. AWS ECR API is the authoritative check.
 if aws ecr describe-images \
-        --repository-name aegis-stateful-mock \
+        --repository-name "${ECR_REPO}" \
         --image-ids "imageTag=${STATEFUL_TAG}" \
         --region "$AWS_REGION" >/dev/null 2>&1; then
     echo "  ℹ️  ${STATEFUL_TAG} already in ECR — skipping push (tag is IMMUTABLE)"
 else
-    docker --config "$DOCKER_CONFIG" push "${ECR_REGISTRY}/aegis-stateful-mock:${STATEFUL_TAG}"
+    docker --config "$DOCKER_CONFIG" push "${ECR_REGISTRY}/${ECR_REPO}:${STATEFUL_TAG}"
     echo "  ✅ pushed mock to ECR"
 fi
 
@@ -201,7 +218,7 @@ fi
 # adds a new attestation manifest on every build even when content is cached,
 # so the local RepoDigests entry can diverge from what's actually in ECR.
 STATEFUL_DIGEST=$(aws ecr describe-images \
-    --repository-name aegis-stateful-mock \
+    --repository-name "${ECR_REPO}" \
     --image-ids "imageTag=${STATEFUL_TAG}" \
     --region "$AWS_REGION" \
     --query 'imageDetails[0].imageDigest' \
@@ -232,7 +249,7 @@ echo
 echo "=== Step 6/7: Patch values.yaml + templates/blackbox-exporter.yaml ==="
 # ============================================================================
 # stateful tier — repository + tag + digest
-sed_inplace "s|repository: aegis-stateful-mock\$|repository: ${ECR_REGISTRY}/aegis-stateful-mock|" "$VALUES"
+sed_inplace "s|repository: aegis-stateful-mock\$|repository: ${ECR_REGISTRY}/${ECR_REPO}|" "$VALUES"
 sed_inplace "s|tag: \"v0.1\"\$|tag: \"${STATEFUL_TAG}\"|" "$VALUES"
 sed_inplace "s|digest: \"sha256:TODO_FILL_REAL_DIGEST_VIA_DOCKER_PULL\"|digest: \"${STATEFUL_DIGEST}\"|" "$VALUES"
 

@@ -432,12 +432,15 @@ fi
 # terraform scope). MUST be cleaned to (a) avoid storage cost
 # accumulation and (b) free the IMMUTABLE tag v0.1.0 for the next demo.
 # Safety: account ID was verified in Layer 1; we target the exact repo
-# name `aegis-stateful-mock` only — no fuzzy match.
+# name sourced from runbook-config.yaml — no fuzzy match.
 
 log ""
 log "─── Phase 5b/7: ECR repository cleanup ───"
 
-ECR_REPO="aegis-stateful-mock"
+# Read ECR repo name from shared config; fall back to current default if
+# the dev tree is partially broken (teardown should still work).
+TEARDOWN_CONFIG="$(dirname "$(realpath "$0")")/../dev/runbook-config.yaml"
+ECR_REPO=$(yq '.ecr.repository' "${TEARDOWN_CONFIG}" 2>/dev/null || echo "aegis-statefulset-mock")
 if aws ecr describe-repositories --repository-names "${ECR_REPO}" \
        --region "${AWS_REGION}" >/dev/null 2>&1; then
     IMG_COUNT=$(aws ecr describe-images --repository-name "${ECR_REPO}" \
