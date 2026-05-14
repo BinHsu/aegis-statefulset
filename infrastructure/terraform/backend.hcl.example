@@ -1,0 +1,22 @@
+# infrastructure/terraform/backend.hcl.example
+#
+# Copy to backend.hcl after running the bootstrap module, then:
+#   terraform init -backend-config=backend.hcl
+#
+# Easiest path — bootstrap module emits a ready-to-use value:
+#   cd infrastructure/terraform/bootstrap
+#   terraform output -raw backend_hcl_template > ../backend.hcl
+#
+# Manual fill — values for Bin's staging account (placeholder pattern;
+# substitute YOUR account ID + YOUR region):
+#   bucket         = "aegis-statefulset-tfstate-staging-<12-digit-account-id>"
+#   key            = "main/terraform.tfstate"
+#   region         = "eu-central-1"
+#   encrypt        = true
+#   dynamodb_table = "aegis-statefulset-tflock-staging"
+
+bucket         = "aegis-statefulset-tfstate-<environment>-<aws-account-id>"
+key            = "main/terraform.tfstate"
+region         = "eu-central-1"
+encrypt        = true
+dynamodb_table = "aegis-statefulset-tflock-<environment>"

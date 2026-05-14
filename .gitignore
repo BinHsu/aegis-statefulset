@@ -108,3 +108,12 @@ scripts/dev/runbook-config.yaml
 # truth is .md; PDFs are derived artifacts, not committed.
 # =============================================================
 docs/submission-pdfs/
+
+# =============================================================
+# Terraform state backend config (generated from
+# bootstrap module output; never committed)
+# =============================================================
+infrastructure/terraform/backend.hcl
+infrastructure/terraform/bootstrap/terraform.tfstate
+infrastructure/terraform/bootstrap/terraform.tfstate.backup
+infrastructure/terraform/bootstrap/.terraform.lock.hcl

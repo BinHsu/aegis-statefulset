@@ -24,12 +24,10 @@ terraform {
     }
   }
 
-  # Backend config — set in environment-specific .tfvars or env vars
-  # backend "s3" {
-  #   bucket         = "aegis-statefulset-tfstate"
-  #   key            = "infrastructure/terraform.tfstate"
-  #   region         = "eu-central-1"
-  #   dynamodb_table = "aegis-statefulset-tfstate-lock"
-  #   encrypt        = true
-  # }
+  # S3 remote backend. Values supplied via `-backend-config=backend.hcl`
+  # so the bucket/table names (which include the account ID) don't get
+  # baked into the source tree. See:
+  #   - infrastructure/terraform/bootstrap/README.md   (one-time setup)
+  #   - infrastructure/terraform/backend.hcl.example   (template)
+  backend "s3" {}
 }
