@@ -1,0 +1,194 @@
+{
+    "Label": "VolumeReadBytes",
+    "Datapoints": [
+        {
+            "Timestamp": "2026-05-14T15:48:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:30:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:31:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:49:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:32:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:50:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:33:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:51:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:43:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:44:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:45:00+02:00",
+            "Average": 3347456.0,
+            "Sum": 3347456.0,
+            "Maximum": 3347456.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:46:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:47:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:56:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:39:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:40:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:41:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:42:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:52:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:34:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:53:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:35:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:36:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:54:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:37:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:55:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        },
+        {
+            "Timestamp": "2026-05-14T15:38:00+02:00",
+            "Average": 0.0,
+            "Sum": 0.0,
+            "Maximum": 0.0,
+            "Unit": "Bytes"
+        }
+    ]
+}

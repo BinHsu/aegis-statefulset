@@ -1,0 +1,304 @@
+{
+    "Metrics": [
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "scheduler_pending_pods_ACTIVEQ",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_request_total_429",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_current_inflight_requests_MUTATING",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "scheduler_pending_pods_UNSCHEDULABLE",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_storage_size_bytes",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "scheduler_pending_pods_GATED",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_current_inflight_requests_READONLY",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_request_total_4XX",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_request_duration_seconds_GET_P99",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "scheduler_pending_pods",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_flowcontrol_current_executing_seats",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_request_total_LIST_PODS",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_request_total",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_request_duration_seconds_PUT_P99",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_request_total_5XX",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "scheduler_pending_pods_BACKOFF",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "etcd_mvcc_db_total_size_in_use_in_bytes",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "scheduler_schedule_attempts_SCHEDULED",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "scheduler_schedule_attempts_total",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_admission_webhook_request_total_ADMIT",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_admission_webhook_request_total",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_request_duration_seconds_LIST_P99",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "scheduler_schedule_attempts_UNSCHEDULABLE",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_admission_webhook_request_total_VALIDATING",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "scheduler_schedule_attempts_ERROR",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_request_duration_seconds_POST_P99",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_request_duration_seconds_DELETE_P99",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_request_duration_seconds_PATCH_P99",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_admission_webhook_rejection_count_VALIDATING",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        },
+        {
+            "Namespace": "AWS/EKS",
+            "MetricName": "apiserver_admission_webhook_rejection_count_ADMIT",
+            "Dimensions": [
+                {
+                    "Name": "ClusterName",
+                    "Value": "aegis-statefulset-staging"
+                }
+            ]
+        }
+    ]
+}
