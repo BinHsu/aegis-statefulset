@@ -4,6 +4,16 @@ Artefacts captured during the staging-environment deploy + chaos demo.
 Each file pairs with a documented architectural claim somewhere in the
 repo; the table below maps evidence → claim → reproduction path.
 
+## Start here
+
+**`DR_REPORT.md`** ([PDF: `DR_REPORT.pdf`](./DR_REPORT.pdf)) is the
+narrative wrapper for everything in this directory — what hypothesis
+each artefact tests, what was actually run today vs documented for
+later, and a per-file provenance table mapping each PNG / JSON / log
+to the exact command (or browser action) that produced it. Read that
+first; the rest of this README is reference-style lookup once you've
+seen the story.
+
 ## Files in this directory
 
 | File | What it shows | Claim it backs |
