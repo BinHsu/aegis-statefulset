@@ -45,6 +45,7 @@ images:
 iam:
   role_name: aegis-gha-ci
   policy_name: aegis-gha-ci-plan-only
+  break_glass_role: aegis-emergency-break-glass
 oidc:
   github_url: https://token.actions.githubusercontent.com
   audience: sts.amazonaws.com
