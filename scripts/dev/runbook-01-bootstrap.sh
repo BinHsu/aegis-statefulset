@@ -248,20 +248,23 @@ echo "  blackbox: $BLACKBOX_DIGEST"
 echo
 echo "=== Step 6/7: Patch values.yaml + templates/blackbox-exporter.yaml ==="
 # ============================================================================
-# stateful tier — repository + tag + digest
-sed_inplace "s|repository: aegis-stateful-mock\$|repository: ${ECR_REGISTRY}/${ECR_REPO}|" "$VALUES"
-sed_inplace "s|tag: \"v0.1\"\$|tag: \"${STATEFUL_TAG}\"|" "$VALUES"
-sed_inplace "s|digest: \"sha256:TODO_FILL_REAL_DIGEST_VIA_DOCKER_PULL\"|digest: \"${STATEFUL_DIGEST}\"|" "$VALUES"
+# Idempotent structured edits via yq — overwrites regardless of prior
+# state (works for fresh TODO_FILL_REAL_DIGEST placeholders OR previously-
+# patched real values). Previous sed approach only matched the initial
+# TODO state and was a no-op on subsequent runs after rename / re-pin.
+yq -i ".stateful.image.repository = \"${ECR_REGISTRY}/${ECR_REPO}\"" "$VALUES"
+yq -i ".stateful.image.tag = \"${STATEFUL_TAG}\"" "$VALUES"
+yq -i ".stateful.image.digest = \"${STATEFUL_DIGEST}\"" "$VALUES"
+yq -i ".api.image.tag = \"${NGINX_TAG}\"" "$VALUES"
+yq -i ".api.image.digest = \"${NGINX_DIGEST}\"" "$VALUES"
+yq -i ".envoy.image.tag = \"${ENVOY_TAG}\"" "$VALUES"
+yq -i ".envoy.image.digest = \"${ENVOY_DIGEST}\"" "$VALUES"
 
-# nginx + envoy — context-aware sed (TODO_VERIFY_FROM_DOCKER_HUB appears in
-# both; bound the substitution by repository line + next blank line)
-sed_inplace "/^    repository: nginx\$/,/^\$/ s|digest: \"sha256:TODO_VERIFY_FROM_DOCKER_HUB\"|digest: \"${NGINX_DIGEST}\"|" "$VALUES"
-sed_inplace "/^    repository: envoyproxy\/envoy\$/,/^\$/ s|digest: \"sha256:TODO_VERIFY_FROM_DOCKER_HUB\"|digest: \"${ENVOY_DIGEST}\"|" "$VALUES"
-
-# blackbox-exporter — image is hardcoded in the template file, not
-# parameterised through values.yaml (minor chart inconsistency that's
-# worth refactoring post-submission). Patch the template directly.
-sed_inplace "s|prom/blackbox-exporter:${BLACKBOX_TAG}@sha256:TODO_VERIFY_FROM_DOCKER_HUB|prom/blackbox-exporter:${BLACKBOX_TAG}@${BLACKBOX_DIGEST}|" "$BLACKBOX_TEMPLATE"
+# blackbox-exporter — image is hardcoded in the template file (chart
+# inconsistency worth refactoring post-submission). Use a regex sed
+# that matches either the TODO placeholder OR any existing sha256:hex64
+# digest, so re-runs with a new digest update cleanly.
+sed_inplace -E "s|prom/blackbox-exporter:${BLACKBOX_TAG}@sha256:(TODO_VERIFY_FROM_DOCKER_HUB|[A-Fa-f0-9]{64})|prom/blackbox-exporter:${BLACKBOX_TAG}@${BLACKBOX_DIGEST}|" "$BLACKBOX_TEMPLATE"
 
 echo "  ✅ patched values.yaml 3 image blocks + templates/blackbox-exporter.yaml"
 
