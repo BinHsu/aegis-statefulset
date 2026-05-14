@@ -1,12 +1,16 @@
 # `infrastructure/terraform/bootstrap/` — state backend prerequisites
 
-Stage-0 terraform module. Provisions the resources the main composition
+Stage-0 terraform module. Provisions a single resource the main composition
 depends on as its state backend:
 
 | Resource | Purpose |
 |---|---|
-| S3 bucket (versioned, encrypted, public-blocked) | State storage for `infrastructure/terraform/` main composition |
-| DynamoDB table (PAY_PER_REQUEST, PITR enabled) | State lock — prevents concurrent applies |
+| S3 bucket (versioned, encrypted, public-blocked) | State storage **AND** native locking for `infrastructure/terraform/` main composition |
+
+**Why no DynamoDB table?** Terraform 1.10 (released 2024-11) added native
+S3 backend locking via S3 conditional writes (`If-None-Match`). The main
+composition's `backend "s3"` config uses `use_lockfile = true` — one less
+service to provision, monitor, and grant IAM permissions on.
 
 ## Why a separate module
 

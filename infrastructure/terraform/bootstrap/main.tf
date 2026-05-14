@@ -7,7 +7,9 @@
 # Idempotent — re-running is safe.
 
 terraform {
-  required_version = ">= 1.6"
+  # 1.10+ required for the main composition's S3 backend `use_lockfile`
+  # option (native S3-conditional-writes locking, replaces DynamoDB).
+  required_version = ">= 1.10"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -36,7 +38,9 @@ data "aws_caller_identity" "current" {}
 locals {
   # S3 bucket names are globally unique — include account ID to namespace.
   state_bucket_name = "aegis-statefulset-tfstate-${var.environment}-${data.aws_caller_identity.current.account_id}"
-  state_lock_name   = "aegis-statefulset-tflock-${var.environment}"
+  # No separate DynamoDB lock table — terraform 1.10+ S3 backend
+  # `use_lockfile = true` uses S3 conditional writes (If-None-Match)
+  # for native locking. One less service, one less IAM scope.
 }
 
 # ============================================================================
@@ -90,24 +94,14 @@ resource "aws_s3_bucket_lifecycle_configuration" "tfstate" {
 }
 
 # ============================================================================
-# DynamoDB — terraform state lock table
+# State locking — handled by S3 itself via terraform 1.10+ `use_lockfile`
 # ============================================================================
-
-resource "aws_dynamodb_table" "tflock" {
-  name         = local.state_lock_name
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "LockID"
-
-  attribute {
-    name = "LockID"
-    type = "S"
-  }
-
-  point_in_time_recovery {
-    enabled = true
-  }
-
-  lifecycle {
-    prevent_destroy = true # losing the lock table = state-race risk
-  }
-}
+# Terraform 1.10 (Nov 2024) added native S3 locking using S3 conditional
+# writes (If-None-Match) introduced in AWS S3 the same month. The main
+# composition's backend uses `use_lockfile = true` instead of a separate
+# DynamoDB table. Benefits:
+#   - One less service to provision + monitor
+#   - One less IAM scope to manage (no dynamodb:* required)
+#   - Zero DynamoDB cost (even PAY_PER_REQUEST has request fees)
+#   - Lock granularity per-key (same as DynamoDB pattern)
+# See: https://developer.hashicorp.com/terraform/language/backend/s3#use-lockfile

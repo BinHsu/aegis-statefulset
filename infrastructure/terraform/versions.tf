@@ -1,5 +1,8 @@
 terraform {
-  required_version = ">= 1.6"
+  # 1.10+ required for native S3 backend locking (`use_lockfile = true`
+  # in backend config) — replaces the older dynamodb_table approach.
+  # See infrastructure/terraform/bootstrap/README.md for rationale.
+  required_version = ">= 1.10"
 
   required_providers {
     aws = {
