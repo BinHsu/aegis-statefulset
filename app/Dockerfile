@@ -26,7 +26,7 @@ COPY main.go .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app -ldflags="-s -w" main.go
 
 # --- Runtime stage ------------------------------------------------------
-FROM gcr.io/distroless/static@sha256:TODO_VERIFY_FROM_DOCKER_HUB
+FROM gcr.io/distroless/static@sha256:e3f945647ffb95b5839c07038d64f9811adf17308b9121d8a2b87b6a22a80a39
 COPY --from=build /app /app
 USER 65532:65532
 EXPOSE 8080

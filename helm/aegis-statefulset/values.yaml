@@ -17,7 +17,6 @@
 # ====================================================================
 master_az: "eu-central-1a"
 dr_region: "eu-west-1"
-
 # ====================================================================
 # Stateful tier (per ADR-01, ADR-01, ADR-01, ADR-04)
 # ====================================================================
@@ -27,7 +26,6 @@ stateful:
     # Production: cells.count = N (set via terraform import per ADR-05 to
     # match existing per-tenant pod inventory).
     count: 1
-
     # Multi-PVC storage layout per ADR-02 (Path γ — modern K8s database
     # operator pattern used by TiDB / K8ssandra / CloudNativePG operators).
     # Two independent EBS volumes per pod:
@@ -44,17 +42,15 @@ stateful:
       # Production: data 1843Gi + wal 205Gi ≈ 2Ti total (10% WAL ratio)
       data: 18Gi
       wal: 2Gi
-
   # POC mock image — custom Go binary doing /data/<key> filesystem ops
   # (~30 lines, no real LevelDB). Build via scripts/build/build-stateful-mock.sh
   # and update digest below.
   image:
-    repository: aegis-stateful-mock
-    tag: "v0.1"
-    digest: "sha256:TODO_FILL_REAL_DIGEST_VIA_DOCKER_PULL"
+    repository: 251774439261.dkr.ecr.eu-central-1.amazonaws.com/aegis-statefulset-mock
+    tag: "v0.1.0"
+    digest: "sha256:c70aa7d500c40274538b6795ee54bfd295d9f12a3376e8d5a32c66168638a7af"
     # TODO: build via scripts/build/build-stateful-mock.sh and update digest
     pullPolicy: IfNotPresent
-
   resources:
     requests:
       cpu: 100m
@@ -62,11 +58,9 @@ stateful:
     limits:
       cpu: 500m
       memory: 1Gi
-
   pod_anti_affinity:
     # production default; POC override 'soft' via values-poc.yaml
     type: hard
-
   # Startup probe budget for cold-start LevelDB MemTable rebuild (per
   # ADR-02 § Graceful shutdown + cold-start sizing). failure_threshold ×
   # 30s period = total cold-start window before K8s gives up and starts
@@ -75,7 +69,6 @@ stateful:
   # LDB at 2 TB where SSTable forest warm-up is 5–15 min.
   startup_probe:
     failure_threshold: 60
-
 # ====================================================================
 # Stateless API tier (per ADR-01 routing identity, Layer 2 demo)
 # ====================================================================
@@ -84,14 +77,12 @@ stateful:
 api:
   enabled: true
   replicas: 3
-
   image:
     repository: nginx
     tag: "1.27.0"
-    digest: "sha256:TODO_VERIFY_FROM_DOCKER_HUB"
+    digest: "sha256:98f8ec75657d21b924fe4f69b6b9bff2f6550ea48838af479d8894a852000e40"
     # TODO: pull and verify from docker.io/library/nginx:1.27.0
     pullPolicy: IfNotPresent
-
   resources:
     requests:
       cpu: 50m
@@ -99,10 +90,8 @@ api:
     limits:
       cpu: 200m
       memory: 128Mi
-
   pod_anti_affinity:
     type: hard
-
 # ====================================================================
 # Envoy router tier (per ADR-03 placement-table routing)
 # ====================================================================
@@ -112,14 +101,12 @@ api:
 envoy:
   enabled: true
   replicas: 3
-
   image:
     repository: envoyproxy/envoy
     tag: "v1.30.0"
-    digest: "sha256:TODO_VERIFY_FROM_DOCKER_HUB"
+    digest: "sha256:d7d501253a93f0b5fce8e0d3a24f3bef67372c50ed7ea922279c72fc1200be58"
     # TODO: pull and verify from docker.io/envoyproxy/envoy:v1.30.0
     pullPolicy: IfNotPresent
-
   resources:
     requests:
       cpu: 100m
@@ -127,14 +114,11 @@ envoy:
     limits:
       cpu: 500m
       memory: 512Mi
-
   pod_anti_affinity:
     type: hard
-
   cache:
     # 5 min default per ADR-03 (cost-vs-staleness curve in ADR rationale).
     ttl_seconds: 300
-
 # ====================================================================
 # Backup pipeline — Velero schedule (per ADR-04, ADR-04, ADR-04)
 # ====================================================================
@@ -150,21 +134,19 @@ backup:
     # POC default: 5 minutes. Source-region only (no cross-region copy).
     # Operator-tunable; lower bound is filesystem-walk time for the application.
     cadence_minutes: 5
-    retention_days: 7  # operational tier: short retention; matches operational use cases
+    retention_days: 7 # operational tier: short retention; matches operational use cases
   dr:
     # POC default: 4 hours. Cross-region replicated via Velero VSL multi-region.
     # Cadence math: cadence + backup_duration + retry_margin ≤ spec RPO ceiling.
     # 4h + 15min + 30min = 4h45m ≤ 6h spec ceiling (1h15m headroom).
     # Sane upper bound is 5h; 6h has zero margin; daily breaches by 4×.
     cadence_hours: 4
-    retention_days: 30  # DR tier: longer retention for rare region-failure scenarios
-
+    retention_days: 30 # DR tier: longer retention for rare region-failure scenarios
   # Cross-region snapshot tier (per ADR-04).
   cross_region:
     enabled: true
     target_class: "GLACIER_INSTANT_RETRIEVAL"
     target_region: "eu-west-1"
-
 # ====================================================================
 # Disaster Recovery model (per ADR-04 retired, ADR-04, ADR-04)
 # ====================================================================
@@ -174,7 +156,6 @@ ha:
   model: "cold_dr"
   # Operator-overridable target AZ for warm-standby rotation.
   rotation_target_az_default: "eu-central-1b"
-
 # ====================================================================
 # Routing — placement table (per ADR-03)
 # ====================================================================
@@ -183,11 +164,9 @@ routing:
   # satisfying the 6-property contract (atomic CAS / strongly consistent
   # reads / multi-AZ durable / low latency / CDC capable / audit logged).
   backend: dynamodb
-
   # Lookup miss handling (per ADR-03 § 503 semantics).
   miss_response_code: 503
   miss_retry_after_seconds: 30
-
 # ====================================================================
 # Tenant relocation (per ADR-01, ADR-04)
 # ====================================================================
@@ -208,26 +187,22 @@ relocation:
       limits:
         cpu: 200m
         memory: 256Mi
-
   thresholds:
-    pre_emptive_pct: 75              # PR-reviewed relocation
-    emergency_pct: 90                # auto-trigger relocation
-    rate_of_change_gb_per_week: 500  # forecast-driven relocation
-
+    pre_emptive_pct: 75 # PR-reviewed relocation
+    emergency_pct: 90 # auto-trigger relocation
+    rate_of_change_gb_per_week: 500 # forecast-driven relocation
   # Soak window cleanup gate (per ADR-01 step 7).
   # Wave 4: standby refresh condition removed (no standby per ADR-04 retired).
   soak_window:
     minimum_hours: 24
     require_target_backup: true
     require_cross_region_replication: true
-
 # ====================================================================
 # Capacity expansion — new cell, no migration (per ADR-01)
 # ====================================================================
 capacity_expansion:
   aggregate_threshold_pct: 70
-  warm_buffer: 0  # JIT (just-in-time)
-
+  warm_buffer: 0 # JIT (just-in-time)
 # ====================================================================
 # FinOps cost dimensions (per ADR-10)
 # ====================================================================
@@ -238,11 +213,9 @@ finops:
     component: "stateful"
     tier: "stateful"
     data_class: "tenant-data"
-
   cost_metrics:
     scrape_enabled: true
     annotation_prefix: "aegis.io/cost"
-
 # ====================================================================
 # Observability (per ADR-06, NEW Wave 4 Blackbox probe)
 # ====================================================================
@@ -252,36 +225,31 @@ observability:
     probe_targets:
       - https://api.aegis.example.com/healthz
     scrape_interval: 30s
-
 # ====================================================================
 # Storage (per ADR-02)
 # ====================================================================
 storage:
   storage_class: ebs-gp3-az-aware
-  reclaim_policy: Retain  # MANDATORY per ADR-02
-
+  reclaim_policy: Retain # MANDATORY per ADR-02
 # ====================================================================
 # Pod placement (per ADR-01, ADR-01, ADR-01)
 # ====================================================================
 placement:
   topology_spread_constraints:
-    enabled: false  # Wave 4: master-AZ-only, spread constraints retired
-
+    enabled: false # Wave 4: master-AZ-only, spread constraints retired
 # ====================================================================
 # ALB integration (TargetGroupBinding to ALB Target Group)
 # ====================================================================
 alb:
   # Set via Terraform output (module.alb.target_group_arn).
   target_group_arn: ""
-
 # ====================================================================
 # Service Account (per ADR-07 IRSA)
 # ====================================================================
 serviceAccount:
   create: true
   name: aegis-statefulset
-  annotations: {}  # IRSA role ARN injected by Terraform output
-
+  annotations: {} # IRSA role ARN injected by Terraform output
 # ====================================================================
 # Network Policy (per ADR-07)
 # ====================================================================

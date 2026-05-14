@@ -34,7 +34,7 @@ spec:
 
       containers:
         - name: blackbox-exporter
-          image: "prom/blackbox-exporter:v0.25.0@sha256:TODO_VERIFY_FROM_DOCKER_HUB"
+          image: "prom/blackbox-exporter:v0.25.0@sha256:b04a9fef4fa086a02fc7fcd8dcdbc4b7b35cc30cdee860fdc6a19dd8b208d63e"
           # TODO: pull and verify from quay.io/prometheus/blackbox-exporter:v0.25.0
           imagePullPolicy: IfNotPresent
           args:
