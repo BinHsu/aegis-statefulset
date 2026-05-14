@@ -100,14 +100,20 @@ aws ecr describe-repositories --repository-names aegis-stateful-mock \
        --image-tag-mutability IMMUTABLE \
        --region "$AWS_REGION"
 
-# Authenticate Docker daemon to ECR
+# Authenticate Docker daemon to ECR — via ephemeral DOCKER_CONFIG
+# (bypasses macOS Keychain / Linux keyring / Windows Credential Manager so
+# the auth state is OS-agnostic, CI-friendly, and won't conflict with stale
+# credential-helper entries). Cleanup happens automatically at shell exit.
+export DOCKER_CONFIG="$(mktemp -d -t aegis-docker-XXXXXX)"
 aws ecr get-login-password --region "$AWS_REGION" \
-  | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+  | docker --config "$DOCKER_CONFIG" login --username AWS --password-stdin "$ECR_REGISTRY"
 
-# Tag + push
+# Tag + push (subsequent docker commands need --config "$DOCKER_CONFIG"
+# for ECR-authenticated operations; building / tagging work without it)
 docker tag aegis-stateful-mock:v0.1.0 \
   "${ECR_REGISTRY}/aegis-stateful-mock:v0.1.0"
-docker push "${ECR_REGISTRY}/aegis-stateful-mock:v0.1.0"
+docker --config "$DOCKER_CONFIG" push \
+  "${ECR_REGISTRY}/aegis-stateful-mock:v0.1.0"
 
 # Capture digest
 STATEFUL_DIGEST=$(docker inspect \
@@ -115,6 +121,15 @@ STATEFUL_DIGEST=$(docker inspect \
   --format='{{index .RepoDigests 0}}' | cut -d@ -f2)
 echo "stateful: $STATEFUL_DIGEST"
 ```
+
+**Why temp `DOCKER_CONFIG` rather than the default `~/.docker/`:** the
+default config delegates to the OS credential helper — `osxkeychain` on
+macOS, `secretservice` on Linux, `wincred` on Windows. Each has its own
+quirks (Keychain can refuse to overwrite a stale entry with
+`The specified item already exists in the keychain. (-25299)`; Linux
+keyring may not be unlocked in headless / CI sessions). Using `mktemp`
++ `--config` makes the auth state ephemeral and free from cross-process
+state, which is the right default for runbook scripts.
 
 ### 3b. Docker Hub path
 
