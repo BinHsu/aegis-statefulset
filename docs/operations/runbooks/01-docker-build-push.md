@@ -103,8 +103,11 @@ aws ecr describe-repositories --repository-names aegis-stateful-mock \
 # Authenticate Docker daemon to ECR — via ephemeral DOCKER_CONFIG
 # (bypasses macOS Keychain / Linux keyring / Windows Credential Manager so
 # the auth state is OS-agnostic, CI-friendly, and won't conflict with stale
-# credential-helper entries). Cleanup happens automatically at shell exit.
+# credential-helper entries). Pre-populate empty config.json — on some
+# Docker CLI builds, an empty temp dir still triggers the system helper;
+# writing {} forces plaintext storage in this file.
 export DOCKER_CONFIG="$(mktemp -d -t aegis-docker-XXXXXX)"
+echo '{"auths": {}}' > "$DOCKER_CONFIG/config.json"
 aws ecr get-login-password --region "$AWS_REGION" \
   | docker --config "$DOCKER_CONFIG" login --username AWS --password-stdin "$ECR_REGISTRY"
 
