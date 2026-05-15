@@ -132,3 +132,7 @@ infrastructure/terraform/bootstrap/.terraform.lock.hcl
 # Go build artefact from `go build` in app/ (binary name matches the
 # module name in app/go.mod).
 app/aegis-stateful-mock
+
+# terraform archive_file output dir (Lambda deployment zips built at
+# plan time — regenerated, not source).
+infrastructure/terraform/.build/

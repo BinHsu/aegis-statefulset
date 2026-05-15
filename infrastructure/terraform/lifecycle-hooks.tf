@@ -144,17 +144,48 @@ resource "aws_iam_role_policy" "asg_lifecycle_publish" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["sns:Publish"]
-      Resource = aws_sns_topic.asg_drain.arn
-    }]
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["sns:Publish"]
+        Resource = aws_sns_topic.asg_drain.arn
+      },
+      {
+        # The asg_drain SNS topic is SSE-encrypted with aws_kms_key.secrets.
+        # Publishing to an encrypted topic — including the test message AWS
+        # sends when the lifecycle hook is created — requires the publisher
+        # to generate a data key under that CMK.
+        Effect   = "Allow"
+        Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
+        Resource = aws_kms_key.secrets.arn
+      },
+    ]
   })
 }
 
-# Lambda function shell. The deployment package is built and uploaded
-# out-of-band (e.g. by a CI job) — referenced here as a placeholder S3
-# object that operators replace with the real artefact.
+# Lambda deployment package — zipped from infrastructure/lambda/asg-drain/
+# at plan time. The handler is pure stdlib + boto3 (both in the python3.11
+# runtime), so the archive is a single source file with no vendored deps.
+data "archive_file" "asg_drain" {
+  type        = "zip"
+  source_dir  = "${path.module}/../lambda/asg-drain"
+  output_path = "${path.module}/.build/asg-drain.zip"
+}
+
+# Upload the package to the artefacts bucket. terraform manages the object
+# so a cold `terraform apply` is self-contained — no out-of-band CI step.
+resource "aws_s3_object" "asg_drain" {
+  bucket = aws_s3_bucket.lambda_artifacts.id
+  key    = "asg-drain/asg-drain.zip"
+  source = data.archive_file.asg_drain.output_path
+  etag   = data.archive_file.asg_drain.output_md5
+
+  depends_on = [
+    aws_s3_bucket_versioning.lambda_artifacts,
+    aws_s3_bucket_server_side_encryption_configuration.lambda_artifacts,
+  ]
+}
+
 resource "aws_lambda_function" "asg_drain" {
   function_name = "aegis-statefulset-${var.environment}-asg-drain"
   role          = aws_iam_role.asg_drain_lambda.arn
@@ -162,11 +193,9 @@ resource "aws_lambda_function" "asg_drain" {
   handler       = "asg_drain.handler"
   timeout       = 540 # 9 min — must be < heartbeat_timeout
 
-  # Placeholder: real deployment uploads via terraform-managed S3 + ECR.
-  # filename         = "../lambda/asg-drain/build/asg-drain.zip"
-  # source_code_hash = filebase64sha256("../lambda/asg-drain/build/asg-drain.zip")
-  s3_bucket = aws_s3_bucket.lambda_artifacts.id
-  s3_key    = "asg-drain/asg-drain.zip"
+  s3_bucket        = aws_s3_bucket.lambda_artifacts.id
+  s3_key           = aws_s3_object.asg_drain.key
+  source_code_hash = data.archive_file.asg_drain.output_base64sha256
 
   environment {
     variables = {
@@ -176,11 +205,6 @@ resource "aws_lambda_function" "asg_drain" {
   }
 
   tags = local.common_tags
-
-  lifecycle {
-    # source code is updated out-of-band; ignore code hash drift here
-    ignore_changes = [s3_key, source_code_hash]
-  }
 }
 
 resource "aws_s3_bucket" "lambda_artifacts" {

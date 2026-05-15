@@ -109,6 +109,36 @@ resource "helm_release" "kyverno" {
   depends_on = [helm_release.aws_load_balancer_controller]
 }
 
+# monitoring namespace — created explicitly (not via the helm release's
+# create_namespace) so the Grafana Cloud remoteWrite secret can land in
+# it BEFORE the Prometheus CRD is reconciled. The Prometheus operator's
+# remoteWrite basicAuth requires a SecretKeySelector (name + key); it
+# cannot take an inline credential value.
+resource "kubernetes_namespace" "monitoring" {
+  metadata {
+    name = "monitoring"
+  }
+}
+
+# Grafana Cloud basic-auth credentials for Prometheus remoteWrite → Mimir.
+# username = the stack's numeric prometheus_user_id, password = the
+# access-policy token. Consumed by the Prometheus CRD via the
+# basicAuth.{username,password}.{name,key} selectors set on the helm
+# release below.
+resource "kubernetes_secret" "prometheus_remote_write" {
+  metadata {
+    name      = "grafana-cloud-remote-write"
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
+  }
+
+  data = {
+    username = tostring(grafana_cloud_stack.main.prometheus_user_id)
+    password = var.grafana_cloud_token
+  }
+
+  type = "Opaque"
+}
+
 # kube-prometheus-stack — Prometheus + Alertmanager + Grafana operator stack.
 # Per ADR-06 the in-cluster stack is the source of truth for short-window
 # observability; long-term goes to Grafana Cloud (see grafana-cloud.tf).
@@ -118,35 +148,50 @@ resource "helm_release" "kyverno" {
 # because the data path stops at the in-cluster Prometheus — ServiceMonitor
 # scrapes work fine, but the samples never leave the cluster.
 #
-# Auth = Grafana Cloud basic-auth: username is the stack's numeric
-# prometheus_user_id, password is var.grafana_cloud_token (scope must
-# include metrics:write per runbook 04 § 2). The URL gets the /push
-# suffix appended — grafana_cloud_stack.main.prometheus_url returns the
-# query base, remote_write needs the push endpoint.
+# Auth = Grafana Cloud basic-auth via the grafana-cloud-remote-write
+# secret (scope must include metrics:write per runbook 04 § 2). The URL
+# gets the /push suffix — grafana_cloud_stack.main.prometheus_url returns
+# the query base, remote_write needs the push endpoint.
 resource "helm_release" "kube_prometheus_stack" {
   name             = "kube-prometheus-stack"
   repository       = "https://prometheus-community.github.io/helm-charts"
   chart            = "kube-prometheus-stack"
   version          = "56.6.2" # TODO ADR-09: pin to chart digest
-  namespace        = "monitoring"
-  create_namespace = true
+  namespace        = kubernetes_namespace.monitoring.metadata[0].name
+  create_namespace = false
 
   set {
     name  = "prometheus.prometheusSpec.remoteWrite[0].url"
     value = "${grafana_cloud_stack.main.prometheus_url}/push"
   }
 
+  # basicAuth on the Prometheus CRD takes a SecretKeySelector (name +
+  # key), NOT an inline value — username/password reference keys in the
+  # grafana-cloud-remote-write secret created above.
   set {
-    name  = "prometheus.prometheusSpec.remoteWrite[0].basicAuth.username.value"
-    value = tostring(grafana_cloud_stack.main.prometheus_user_id)
+    name  = "prometheus.prometheusSpec.remoteWrite[0].basicAuth.username.name"
+    value = kubernetes_secret.prometheus_remote_write.metadata[0].name
   }
 
-  set_sensitive {
-    name  = "prometheus.prometheusSpec.remoteWrite[0].basicAuth.password.value"
-    value = var.grafana_cloud_token
+  set {
+    name  = "prometheus.prometheusSpec.remoteWrite[0].basicAuth.username.key"
+    value = "username"
   }
 
-  depends_on = [helm_release.aws_load_balancer_controller]
+  set {
+    name  = "prometheus.prometheusSpec.remoteWrite[0].basicAuth.password.name"
+    value = kubernetes_secret.prometheus_remote_write.metadata[0].name
+  }
+
+  set {
+    name  = "prometheus.prometheusSpec.remoteWrite[0].basicAuth.password.key"
+    value = "password"
+  }
+
+  depends_on = [
+    helm_release.aws_load_balancer_controller,
+    kubernetes_secret.prometheus_remote_write,
+  ]
 }
 
 # Velero — Layer 3 of Three-Layer DR (per ADR-04). EBS snapshot + S3 BSL.
@@ -282,11 +327,12 @@ resource "helm_release" "karpenter" {
   name       = "karpenter"
   repository = "oci://public.ecr.aws/karpenter"
   chart      = "karpenter"
-  # v0.34.4 dropped from ECR public. Pinned to the last v0.x line to
-  # avoid the v1.x CRD migration (karpenter.sh/v1alpha5 → v1) which
-  # requires manifest rewrites in NodePool / EC2NodeClass elsewhere.
-  # Bump to v1.x when those CRDs are updated together.
-  version          = "v0.37.0" # TODO ADR-09: pin to chart digest
+  # Pinned to the last v0.x line to avoid the v1.x CRD migration
+  # (karpenter.sh/v1alpha5 → v1) which requires manifest rewrites in
+  # NodePool / EC2NodeClass elsewhere. Bump to 1.x when those CRDs are
+  # updated together. NOTE: the OCI chart tag has no `v` prefix —
+  # `0.37.0`, not `v0.37.0` (the v-prefixed tag 404s).
+  version          = "0.37.0" # TODO ADR-09: pin to chart digest
   namespace        = "karpenter"
   create_namespace = true
 

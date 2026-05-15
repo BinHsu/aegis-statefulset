@@ -16,8 +16,12 @@ resource "aws_ce_anomaly_monitor" "project" {
 }
 
 resource "aws_ce_anomaly_subscription" "project" {
-  name      = "aegis-statefulset-${var.environment}-anomaly-sub"
-  frequency = "DAILY"
+  name = "aegis-statefulset-${var.environment}-anomaly-sub"
+  # IMMEDIATE matches the SNS subscriber below — AWS Cost Anomaly only
+  # permits DAILY / WEEKLY frequency with EMAIL subscribers. Immediate
+  # firing also matches the design intent (alert when a cost anomaly is
+  # detected, not on a digest cadence).
+  frequency = "IMMEDIATE"
 
   monitor_arn_list = [aws_ce_anomaly_monitor.project.arn]
 

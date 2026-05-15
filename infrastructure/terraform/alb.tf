@@ -102,3 +102,45 @@ resource "aws_s3_bucket_public_access_block" "alb_logs" {
   ignore_public_acls      = true
   restrict_public_buckets = true
 }
+
+# Bucket policy granting Elastic Load Balancing permission to deliver
+# access logs. Without this the aws_lb access_logs block fails at apply
+# with "Access Denied for bucket". Two grant paths for robustness:
+#   1. logdelivery.elasticloadbalancing.amazonaws.com — the modern
+#      service principal (AWS-recommended, all commercial regions).
+#   2. The eu-central-1 regional ELB service account (054676820928) —
+#      the pre-2022-Region log-delivery path; harmless belt-and-suspenders.
+# block_public_policy stays true: an AWS-service-principal grant is not
+# a "public" grant, so the public-access-block does not reject it.
+resource "aws_s3_bucket_policy" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "ALBLogDeliveryWriteServicePrincipal"
+        Effect    = "Allow"
+        Principal = { Service = "logdelivery.elasticloadbalancing.amazonaws.com" }
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.alb_logs.arn}/*"
+      },
+      {
+        Sid       = "ALBLogDeliveryWriteRegionalAccount"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::054676820928:root" }
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.alb_logs.arn}/*"
+      },
+      {
+        Sid       = "ALBLogDeliveryAclCheck"
+        Effect    = "Allow"
+        Principal = { Service = "logdelivery.elasticloadbalancing.amazonaws.com" }
+        Action    = "s3:GetBucketAcl"
+        Resource  = aws_s3_bucket.alb_logs.arn
+      },
+    ]
+  })
+
+  depends_on = [aws_s3_bucket_public_access_block.alb_logs]
+}

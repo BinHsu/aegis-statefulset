@@ -267,21 +267,72 @@ resource "aws_iam_role_policy" "karpenter" {
   name = "karpenter-permissions"
   role = aws_iam_role.karpenter.id
 
+  # Karpenter v0.37 controller permission set. The original 6-action
+  # policy was missing the EC2 Describe* family (DescribeInstanceTypes
+  # first to fail — the controller's startup connectivity check), launch
+  # template management, pricing/SSM for instance selection + AMI
+  # resolution, instance-profile management, and SQS for the interruption
+  # queue. Resource = "*" is a POC simplification; production should adopt
+  # the karpenter-published scoped policy (per-Sid ARN + tag conditions).
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "KarpenterEC2"
         Effect = "Allow"
         Action = [
-          "ec2:RunInstances",
+          "ec2:CreateFleet",
+          "ec2:CreateLaunchTemplate",
           "ec2:CreateTags",
-          "ec2:DescribeInstances",
+          "ec2:DeleteLaunchTemplate",
+          "ec2:RunInstances",
           "ec2:TerminateInstances",
-          "iam:PassRole",
-          "eks:DescribeCluster"
+          "ec2:DescribeAvailabilityZones",
+          "ec2:DescribeImages",
+          "ec2:DescribeInstances",
+          "ec2:DescribeInstanceTypeOfferings",
+          "ec2:DescribeInstanceTypes",
+          "ec2:DescribeLaunchTemplates",
+          "ec2:DescribeSecurityGroups",
+          "ec2:DescribeSpotPriceHistory",
+          "ec2:DescribeSubnets",
         ]
         Resource = "*"
-      }
+      },
+      {
+        Sid    = "KarpenterPricingSSMEKS"
+        Effect = "Allow"
+        Action = [
+          "pricing:GetProducts",
+          "ssm:GetParameter",
+          "eks:DescribeCluster",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "KarpenterInstanceProfile"
+        Effect = "Allow"
+        Action = [
+          "iam:PassRole",
+          "iam:CreateInstanceProfile",
+          "iam:TagInstanceProfile",
+          "iam:GetInstanceProfile",
+          "iam:AddRoleToInstanceProfile",
+          "iam:RemoveRoleFromInstanceProfile",
+          "iam:DeleteInstanceProfile",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "KarpenterInterruptionQueue"
+        Effect = "Allow"
+        Action = [
+          "sqs:DeleteMessage",
+          "sqs:GetQueueUrl",
+          "sqs:ReceiveMessage",
+        ]
+        Resource = "*"
+      },
     ]
   })
 }

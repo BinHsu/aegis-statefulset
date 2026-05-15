@@ -19,10 +19,11 @@
 
 # Auth: token lives in a K8s Secret so the rendered ConfigMap is plan-diff
 # friendly. River config references the token via sys.env("GRAFANA_CLOUD_TOKEN").
+# The monitoring namespace is created explicitly in cluster-controllers.tf.
 resource "kubernetes_secret" "alloy_grafana_cloud_token" {
   metadata {
     name      = "alloy-grafana-cloud-token"
-    namespace = "monitoring"
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
   }
 
   data = {
@@ -30,8 +31,6 @@ resource "kubernetes_secret" "alloy_grafana_cloud_token" {
   }
 
   type = "Opaque"
-
-  depends_on = [helm_release.kube_prometheus_stack]
 }
 
 resource "helm_release" "grafana_alloy" {
@@ -39,8 +38,8 @@ resource "helm_release" "grafana_alloy" {
   repository       = "https://grafana.github.io/helm-charts"
   chart            = "alloy"
   version          = "0.9.2" # TODO ADR-09: pin to chart digest
-  namespace        = "monitoring"
-  create_namespace = false # monitoring ns created by kube-prometheus-stack
+  namespace        = kubernetes_namespace.monitoring.metadata[0].name
+  create_namespace = false # monitoring ns created in cluster-controllers.tf
 
   values = [
     yamlencode({
@@ -70,17 +69,21 @@ resource "helm_release" "grafana_alloy" {
         # the cluster-internal Service auto-created by the chart routes
         # workload-pod OTLP traffic in. Application points its SDK at
         # alloy.monitoring.svc.cluster.local:4318 (per helm chart values:
-        # observability.otel.endpoint).
+        # observability.otel.endpoint). targetPort is mandatory — it
+        # becomes the container port; omitting it makes the StatefulSet
+        # pod spec invalid (containerPort: Required value).
         extraPorts = [
           {
-            name     = "otlp-http"
-            port     = 4318
-            protocol = "TCP"
+            name       = "otlp-http"
+            port       = 4318
+            targetPort = 4318
+            protocol   = "TCP"
           },
           {
-            name     = "otlp-grpc"
-            port     = 4317
-            protocol = "TCP"
+            name       = "otlp-grpc"
+            port       = 4317
+            targetPort = 4317
+            protocol   = "TCP"
           },
         ]
       }

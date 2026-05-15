@@ -32,7 +32,83 @@ resource "aws_kms_key" "logs" {
   deletion_window_in_days = 30
   enable_key_rotation     = true
 
+  # CloudWatch Logs encryption requires the KMS key policy to explicitly
+  # grant the logs service principal — unlike most AWS services, CW Logs
+  # does NOT work through IAM-only access on a default key policy.
+  policy = data.aws_iam_policy_document.logs_kms.json
+
   tags = merge(local.common_tags, { Tier = "logs" })
+}
+
+data "aws_iam_policy_document" "logs_kms" {
+  # Restate root access — once a custom key policy is set it fully
+  # replaces the default, so account-IAM-governed access must be
+  # re-granted explicitly or terraform loses the ability to manage it.
+  statement {
+    sid       = "EnableRootAccount"
+    effect    = "Allow"
+    actions   = ["kms:*"]
+    resources = ["*"]
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+  }
+
+  # CloudWatch Logs service — required for log-group SSE-KMS (cloudtrail.tf
+  # log group). Scoped by encryption-context to this account's log groups.
+  statement {
+    sid    = "AllowCloudWatchLogs"
+    effect = "Allow"
+    actions = [
+      "kms:Encrypt",
+      "kms:Decrypt",
+      "kms:ReEncrypt*",
+      "kms:GenerateDataKey*",
+      "kms:DescribeKey",
+    ]
+    resources = ["*"]
+    principals {
+      type        = "Service"
+      identifiers = ["logs.${var.aws_region}.amazonaws.com"]
+    }
+    condition {
+      test     = "ArnLike"
+      variable = "kms:EncryptionContext:aws:logs:arn"
+      values   = ["arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:*"]
+    }
+  }
+
+  # CloudTrail uses this same key to encrypt the log files it delivers to
+  # the cloudtrail S3 bucket (cloudtrail.tf — both the trail's kms_key_id
+  # and the bucket SSE point here). CreateTrail validates key access up
+  # front, hence InsufficientEncryptionPolicyException without this grant.
+  statement {
+    sid       = "AllowCloudTrailEncryptLogFiles"
+    effect    = "Allow"
+    actions   = ["kms:GenerateDataKey*"]
+    resources = ["*"]
+    principals {
+      type        = "Service"
+      identifiers = ["cloudtrail.amazonaws.com"]
+    }
+    condition {
+      test     = "StringLike"
+      variable = "kms:EncryptionContext:aws:cloudtrail:arn"
+      values   = ["arn:aws:cloudtrail:*:${data.aws_caller_identity.current.account_id}:trail/*"]
+    }
+  }
+
+  statement {
+    sid       = "AllowCloudTrailDescribeKey"
+    effect    = "Allow"
+    actions   = ["kms:DescribeKey"]
+    resources = ["*"]
+    principals {
+      type        = "Service"
+      identifiers = ["cloudtrail.amazonaws.com"]
+    }
+  }
 }
 
 resource "aws_kms_alias" "logs" {
