@@ -70,6 +70,20 @@ paths = [
     # password-related patterns in failure-mode discussion.
     '''docs/operations/why-velero-not-restic\.md''',
 
+    # CloudTrail / EKS audit-log evidence captures. These JSON dumps contain
+    # `accessKeyId: ASIA...` fields — AWS STS session AccessKey IDs, which
+    # are:
+    #   - STS-temporary (ASIA prefix, max 12 h lifetime)
+    #   - Public log artefacts (every CloudTrail event surfaces them)
+    #   - Not actionable on their own — using one requires the matching
+    #     secret_access_key + session_token, which are NEVER in audit logs
+    # Current HEAD was sanitised in commit 6a37ee1; this allowlist covers
+    # the historical commit blobs that gitleaks scans on full-history runs.
+    # Per ADR-07, real long-lived keys (AKIA prefix) MUST never land in
+    # the repo — the path allowlist below scopes the relaxation to a
+    # narrow directory of expected-shape log evidence only.
+    '''docs/evidence/cloudwatch/.*\.json''',
+
     # _context/ is gitignored anyway, but explicit safety in case of mis-stage
     '''_context/.*''',
 ]
