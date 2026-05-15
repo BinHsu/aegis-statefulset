@@ -12,7 +12,7 @@
         "type": "dashboard"
       },
       {
-        "datasource": "aegis-mimir",
+        "datasource": "grafanacloud-prom",
         "enable": true,
         "iconColor": "red",
         "name": "Security alerts",
@@ -66,7 +66,7 @@
       "title": "OIDC token issuance — flow + failures",
       "description": "GitHub Actions OIDC token requests vs failures. Failures here mean a workflow tried to assume an AWS role but the trust policy rejected the token. Sustained failure rate above zero means a workflow is misconfigured or under attempted abuse.",
       "type": "timeseries",
-      "datasource": {"type": "prometheus", "uid": "aegis-mimir"},
+      "datasource": {"type": "prometheus", "uid": "grafanacloud-prom"},
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
       "targets": [
         {
@@ -167,7 +167,7 @@
       "title": "Kubeconform CI failures — rolling 30 days",
       "description": "Daily count of pre-commit and CI runs where kubeconform rejected a manifest. Used as a leading indicator that schema drift is creeping in. The hook catches most of these locally; CI count above zero on most days suggests a developer is bypassing the local hook.",
       "type": "timeseries",
-      "datasource": {"type": "prometheus", "uid": "aegis-mimir"},
+      "datasource": {"type": "prometheus", "uid": "grafanacloud-prom"},
       "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
       "targets": [
         {

@@ -12,7 +12,7 @@
         "type": "dashboard"
       },
       {
-        "datasource": "aegis-mimir",
+        "datasource": "grafanacloud-prom",
         "enable": true,
         "iconColor": "red",
         "name": "Chaos events",
@@ -51,7 +51,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "aegis-mimir"
+        "uid": "grafanacloud-prom"
       },
       "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
       "targets": [
@@ -126,7 +126,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "aegis-mimir"
+        "uid": "grafanacloud-prom"
       },
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
       "targets": [
@@ -171,7 +171,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "aegis-mimir"
+        "uid": "grafanacloud-prom"
       },
       "gridPos": {"h": 4, "w": 24, "x": 0, "y": 24},
       "targets": [

@@ -85,49 +85,20 @@ resource "grafana_cloud_stack_service_account_token" "dashboards" {
   name               = "terraform-dashboards-token"
 }
 
-# Datasources — Mimir (metrics), Loki (logs), Tempo (traces).
+# Datasources — NOT provisioned here.
 #
-# Fixed `uid`s are mandatory: the dashboard JSON in gitops/grafana/
-# dashboards/ references its datasource by uid. Without a stable uid the
-# dashboards would have to carry a ${DS_*} import placeholder (resolved
-# interactively at import time) — which terraform-provisioned dashboards
-# never resolve, leaving every panel with an unbindable datasource and
-# "No data". The dashboards pin `aegis-mimir` directly.
-resource "grafana_data_source" "mimir" {
-  provider = grafana.stack
-
-  type = "prometheus"
-  name = "Mimir"
-  uid  = "aegis-mimir"
-  url  = grafana_cloud_stack.main.prometheus_url
-
-  basic_auth_enabled  = true
-  basic_auth_username = grafana_cloud_stack.main.prometheus_user_id
-}
-
-resource "grafana_data_source" "loki" {
-  provider = grafana.stack
-
-  type = "loki"
-  name = "Loki"
-  uid  = "aegis-loki"
-  url  = grafana_cloud_stack.main.logs_url
-
-  basic_auth_enabled  = true
-  basic_auth_username = grafana_cloud_stack.main.logs_user_id
-}
-
-resource "grafana_data_source" "tempo" {
-  provider = grafana.stack
-
-  type = "tempo"
-  name = "Tempo"
-  uid  = "aegis-tempo"
-  url  = grafana_cloud_stack.main.traces_url
-
-  basic_auth_enabled  = true
-  basic_auth_username = grafana_cloud_stack.main.traces_user_id
-}
+# Every Grafana Cloud stack is auto-provisioned with built-in,
+# internally-authenticated datasources for its own backends:
+#   grafanacloud-prom   (uid) — Prometheus / Mimir   (metrics)
+#   grafanacloud-logs   (uid) — Loki                 (logs)
+#   grafanacloud-traces (uid) — Tempo                (traces)
+#
+# An earlier revision created custom "Mimir" / "Loki" / "Tempo"
+# datasources here — but they pointed at the bare query URLs (missing
+# the /api/prom query prefix) and lacked the query-side credentials, so
+# every query through them 404'd. The dashboards in gitops/grafana/
+# dashboards/ now pin the built-in `grafanacloud-prom` uid, which works
+# out of the box. The custom datasources were removed.
 
 resource "grafana_folder" "main" {
   provider = grafana.stack

@@ -207,6 +207,30 @@ resource "helm_release" "kube_prometheus_stack" {
     value = "password"
   }
 
+  # writeRelabelConfigs — keep-list curation. The full cluster scrape
+  # (cAdvisor container_*, apiserver_*, the kube-state-metrics family,
+  # node-exporter, etc.) is well over the Grafana Cloud free-tier caps
+  # (15k active series, 1500 samples/s) — Mimir 429-rejects the overflow
+  # and dashboards see partial / no data. This `keep` rule ships only the
+  # metric families the 8 gitops/grafana/dashboards/ dashboards actually
+  # query, which fits comfortably under the free-tier limits. Widen the
+  # regex when a dashboard starts needing a new metric; on a paid tier
+  # with a higher series budget this whole block can be dropped.
+  set {
+    name  = "prometheus.prometheusSpec.remoteWrite[0].writeRelabelConfigs[0].sourceLabels[0]"
+    value = "__name__"
+  }
+
+  set {
+    name  = "prometheus.prometheusSpec.remoteWrite[0].writeRelabelConfigs[0].action"
+    value = "keep"
+  }
+
+  set {
+    name  = "prometheus.prometheusSpec.remoteWrite[0].writeRelabelConfigs[0].regex"
+    value = "up|kube_node_labels|kube_node_status_capacity|kube_node_status_condition|kube_pod_container_status_restarts_total|kube_pod_status_phase|kube_pod_status_ready|karpenter_consolidation_actions_total|probe_success|aegis_.+|csi_sidecar_operations_seconds_.+|velero_.+"
+  }
+
   depends_on = [
     helm_release.aws_load_balancer_controller,
     kubernetes_secret.prometheus_remote_write,
