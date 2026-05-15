@@ -47,10 +47,13 @@ resource "helm_release" "grafana_alloy" {
         configMap = {
           create = true
           content = templatefile("${path.module}/alloy-config.river.tpl", {
-            traces_url  = grafana_cloud_stack.main.traces_url
-            traces_user = tostring(grafana_cloud_stack.main.traces_user_id)
-            logs_url    = grafana_cloud_stack.main.logs_url
-            logs_user   = tostring(grafana_cloud_stack.main.logs_user_id)
+            # Traces ingest via the unified OTLP gateway (otlp_url); its
+            # basic-auth username is the stack instance ID. The per-signal
+            # traces_url is query-only and 404s on OTLP push.
+            otlp_url  = grafana_cloud_stack.main.otlp_url
+            otlp_user = grafana_cloud_stack.main.id
+            logs_url  = grafana_cloud_stack.main.logs_url
+            logs_user = tostring(grafana_cloud_stack.main.logs_user_id)
           })
         }
 

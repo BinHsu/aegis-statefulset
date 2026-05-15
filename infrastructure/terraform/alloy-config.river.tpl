@@ -16,9 +16,13 @@
 // rendered ConfigMap stays diff-friendly in terraform plan output.
 //
 // URL conventions (Grafana Cloud, late 2025):
-//   Tempo OTLP HTTP write path: <traces_url>/otlp + Alloy appends /v1/traces
-//                               → final path /otlp/v1/traces ✓
-//   Loki push path:             <logs_url>/loki/api/v1/push  ✓
+//   Traces: Grafana Cloud ingests OTLP only through the unified OTLP
+//           gateway — <otlp_url>/otlp, Alloy appends /v1/traces. The
+//           per-signal traces_url (tempo-*.grafana.net) is the QUERY /
+//           datasource endpoint and 404s on OTLP push. The gateway's
+//           basic-auth username is the stack instance ID, not the
+//           per-signal traces user id.
+//   Loki:   <logs_url>/loki/api/v1/push — the Loki-native push path. ✓
 
 // ---- Traces: OTLP receiver → Tempo --------------------------------------
 
@@ -45,13 +49,13 @@ otelcol.processor.batch "default" {
 
 otelcol.exporter.otlphttp "tempo" {
   client {
-    endpoint = "${traces_url}/otlp"
+    endpoint = "${otlp_url}/otlp"
     auth     = otelcol.auth.basic.tempo.handler
   }
 }
 
 otelcol.auth.basic "tempo" {
-  username = "${traces_user}"
+  username = "${otlp_user}"
   password = sys.env("GRAFANA_CLOUD_TOKEN")
 }
 
