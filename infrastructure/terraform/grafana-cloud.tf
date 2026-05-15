@@ -36,8 +36,8 @@ resource "grafana_cloud_stack" "main" {
   # Reusing the existing "aegis" stack rather than creating a new one —
   # the operator's Grafana Cloud free tier permits one stack per org.
   # Name + slug match the existing instance so terraform-import lines up.
-  name        = "aegis.grafana.net"
-  slug        = "aegis"
+  name = "aegis.grafana.net"
+  slug = "aegis"
   # Imported state stores the internal cluster slug (prod-eu-west-2)
   # rather than the user-facing region slug ("eu") because Grafana's
   # read-path returns the cluster identifier. Pin to match state.

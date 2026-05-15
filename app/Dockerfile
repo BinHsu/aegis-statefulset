@@ -18,12 +18,15 @@
 #     --format='{{index .RepoDigests 0}}'
 
 # --- Build stage --------------------------------------------------------
-FROM golang:1.22-alpine AS build
+FROM golang:1.26-alpine AS build
 WORKDIR /src
-COPY main.go .
+# Module files first so the dep download layer caches independently of source.
+COPY go.mod go.sum ./
+RUN go mod download
+COPY *.go ./
 # CGO_ENABLED=0 ensures static binary (required for distroless/static base).
 # -ldflags="-s -w" strips debug + symbol tables.
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app -ldflags="-s -w" main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app -ldflags="-s -w" .
 
 # --- Runtime stage ------------------------------------------------------
 FROM gcr.io/distroless/static@sha256:e3f945647ffb95b5839c07038d64f9811adf17308b9121d8a2b87b6a22a80a39

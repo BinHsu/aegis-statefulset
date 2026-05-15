@@ -113,8 +113,12 @@ spec:
       port: 9115
       targetPort: 9115
       protocol: TCP
+{{- if .Values.observability.blackbox.probe_targets }}
 ---
 # Probe CRD telling Prometheus Operator which targets to scrape via blackbox.
+# Rendered only when probe_targets is non-empty; the exporter Deployment +
+# Service above stay up regardless so operators can apply Probe CRs out-of-band
+# without re-templating.
 apiVersion: monitoring.coreos.com/v1
 kind: Probe
 metadata:
@@ -137,4 +141,5 @@ spec:
         {{- range .Values.observability.blackbox.probe_targets }}
         - {{ . | quote }}
         {{- end }}
+{{- end }}
 {{- end }}

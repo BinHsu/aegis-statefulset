@@ -123,6 +123,34 @@ spec:
               containerPort: 9090
               protocol: TCP
 
+          # OTel SDK config per ADR-06 § 2.
+          # OTEL_EXPORTER_OTLP_ENDPOINT points at the in-cluster Grafana Alloy
+          # which receives OTLP and forwards to Grafana Cloud Tempo. Pod /
+          # namespace identity flow through OTEL_RESOURCE_ATTRIBUTES so spans
+          # are auto-tagged with k8s.pod.name + k8s.namespace.name without
+          # an OTel Operator install.
+          env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.observability.otel.endpoint | quote }}
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: "http/protobuf"
+            - name: APP_VERSION
+              value: {{ .Values.stateful.image.tag | quote }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "k8s.pod.name=$(POD_NAME),k8s.namespace.name=$(POD_NAMESPACE),k8s.pod.uid=$(POD_UID)"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+
           # Graceful shutdown sequence (per ADR-02 § Graceful shutdown).
           # K8s SIGTERM → preStop runs first → then SIGTERM hits the
           # process → the app's signal handler does http.Server.Shutdown

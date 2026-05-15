@@ -128,3 +128,7 @@ infrastructure/terraform/backend.hcl
 infrastructure/terraform/bootstrap/terraform.tfstate
 infrastructure/terraform/bootstrap/terraform.tfstate.backup
 infrastructure/terraform/bootstrap/.terraform.lock.hcl
+
+# Go build artefact from `go build` in app/ (binary name matches the
+# module name in app/go.mod).
+app/aegis-stateful-mock

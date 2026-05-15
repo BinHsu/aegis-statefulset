@@ -1,0 +1,36 @@
+{{- /*
+  ServiceMonitor for the app's own /metrics endpoint on :9090 (per ADR-06 § 1).
+
+  Scrapes the Go runtime + process collectors AND the app-level
+  aegis_data_ops_total counter from every primary StatefulSet pod.
+  Companion to servicemonitor-telemetry.yaml (which scrapes the sidecar's
+  per-tenant gauge on :9091).
+
+  Both ServiceMonitors land in the in-cluster Prometheus (kube-prometheus-stack
+  helm release in infrastructure/terraform/cluster-controllers.tf), which
+  remoteWrites to Grafana Cloud Mimir per cluster-controllers.tf:121.
+*/ -}}
+{{- if .Values.observability.service_monitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "aegis-statefulset.fullname" . }}-app
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis-statefulset.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app-metrics
+spec:
+  selector:
+    matchLabels:
+      {{- include "aegis-statefulset.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: stateful-data
+      aegis.io/role: primary
+  endpoints:
+    - port: metrics
+      interval: {{ .Values.observability.service_monitor.interval }}
+      path: /metrics
+      scheme: http
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+{{- end }}

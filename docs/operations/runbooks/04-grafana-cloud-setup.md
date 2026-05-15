@@ -144,33 +144,69 @@ annotations) is in place.
 
 ## 6. Wire the cluster to send telemetry
 
-Once the EKS cluster is up (Runbook 02 Stage C), the OpenTelemetry
-Collector + Promtail / Grafana Agent need to know where to send.
-The Helm chart pulls the endpoint URLs from the Grafana stack via
-terraform outputs. Confirm:
+Once the EKS cluster is up (Runbook 02 Stage C), three send-paths
+populate the dashboards:
+
+| Signal | Sender | Destination | Wired in |
+|---|---|---|---|
+| Metrics | in-cluster Prometheus `remoteWrite` | Grafana Cloud Mimir | `cluster-controllers.tf` (`kube_prometheus_stack`) |
+| Logs    | Grafana Alloy `loki.source.kubernetes` | Grafana Cloud Loki | `grafana-alloy.tf` + `alloy-config.river.tpl` |
+| Traces  | Grafana Alloy `otelcol.exporter.otlphttp` | Grafana Cloud Tempo | `grafana-alloy.tf` + `alloy-config.river.tpl` |
+
+App pods point their OpenTelemetry SDK at the in-cluster Alloy service
+(`http://alloy.monitoring.svc.cluster.local:4318`); Alloy in turn pushes
+upstream using basic-auth credentials sourced from the
+`alloy-grafana-cloud-token` K8s Secret.
+
+Confirm the Alloy ConfigMap rendered with the expected endpoints:
 
 ```bash
-kubectl get configmap -n monitoring otel-collector-config -o yaml \
-  | grep -A2 "endpoint:"
-# expect: prometheus-prod-XX-prod-eu-XXX.grafana.net (Mimir)
-#         logs-prod-eu-XXX.grafana.net               (Loki)
-#         tempo-eu-XXX.grafana.net                   (Tempo)
+kubectl get configmap -n monitoring alloy -o yaml \
+  | grep -E 'endpoint|url' | head -20
+# expect URLs ending in:
+#   tempo-prod-XX-prod-eu-XXX.grafana.net/otlp   (traces export)
+#   logs-prod-eu-XXX.grafana.net/loki/api/v1/push (logs push)
 ```
 
-Trigger a request through the system and check Grafana for arrival:
+Confirm Alloy + Prometheus are running:
 
 ```bash
-curl -X POST "http://${ALB_HOST}/data" -H 'X-Tenant: t1' -d 'k=foo&v=bar'
-# wait ~30s for scrape interval
+kubectl get pods -n monitoring
+# expect:
+#   alloy-0                                       1/1 Running
+#   prometheus-kube-prometheus-stack-0           2/2 Running
+#   kube-prometheus-stack-*                       Running
+```
+
+Trigger a request through the system and check Grafana for arrival
+of all three signals:
+
+```bash
+curl -X POST "http://${ALB_HOST}/data" -H 'Content-Type: application/json' \
+  -d '{"key":"smoke-test","value":"hello"}'
+# wait ~30s for scrape/push intervals
 
 # In Grafana: Explore → Mimir → query
-#   rate(http_requests_total{tenant="t1"}[1m])
+#   rate(aegis_data_ops_total[1m])
 # expect: a non-zero value
+
+# Explore → Loki → query
+#   {namespace="aegis-stateful"} |= "data"
+# expect: at least one log line; trace_id field present per ADR-06 § 3
+
+# Explore → Tempo → search
+#   service.name="aegis-stateful-mock"
+# expect: traces with two-level shape http.server (root) → fileops.write (child)
 ```
 
-If you see "no data" after 5 min:
-- Check OTel Collector logs: `kubectl logs -n monitoring -l app=otel-collector`
-- Most common cause: token scope missing `metrics:write` — re-mint at Step 2
+If you see "no data" after 5 min in any single pane:
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Mimir empty, Loki+Tempo OK | Prometheus `remoteWrite` not configured | check `kube_prometheus_stack` helm release; `kubectl logs -n monitoring prometheus-* -c prometheus \| grep -i remote` |
+| Loki empty | Alloy can't reach Loki ingest endpoint | `kubectl logs -n monitoring alloy-0 \| grep -i loki` — token scope must include `logs:write` |
+| Tempo empty, Loki OK | App's `OTEL_EXPORTER_OTLP_ENDPOINT` env unreachable | `kubectl exec <pod> -- env \| grep OTEL` + `kubectl get svc -n monitoring alloy` |
+| All three empty | Most likely cause: token scope missing | re-mint at Step 2 with metrics:write + logs:write + traces:write |
 
 ---
 

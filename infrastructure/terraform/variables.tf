@@ -39,7 +39,7 @@ variable "kubernetes_version" {
   # When bumping from a cluster that's already created, step one version
   # at a time to keep the upgrade in-place. Fresh clusters can start at
   # the latest supported version directly.
-  default     = "1.30"
+  default = "1.30"
 }
 
 variable "stateful_node_instance_types" {

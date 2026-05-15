@@ -220,10 +220,26 @@ finops:
 # Observability (per ADR-06, NEW Wave 4 Blackbox probe)
 # ====================================================================
 observability:
+  # OTel SDK destination (per ADR-06 § 2). The in-cluster Grafana Alloy
+  # service exposes OTLP/HTTP on :4318 and forwards to Grafana Cloud Tempo
+  # (traces) + Loki (logs scraped from pod stdout via k8s discovery).
+  # Override per environment overlay if Alloy is deployed elsewhere.
+  otel:
+    endpoint: "http://alloy.monitoring.svc.cluster.local:4318"
+  # ServiceMonitor for the app's own /metrics on :9090 (process + Go
+  # runtime + aegis_data_ops_total). Independent of the sidecar
+  # tenant-storage ServiceMonitor (servicemonitor-telemetry.yaml).
+  service_monitor:
+    enabled: true
+    interval: 30s
   blackbox:
     enabled: true
-    probe_targets:
-      - https://api.aegis.example.com/healthz
+    # Operator wires real ALB DNS (e.g. https://api.example.com/healthz)
+    # in an environment overlay — POC default is empty because the chart
+    # has no knowledge of the deployment's public hostname; previously the
+    # placeholder `api.aegis.example.com` resolved nowhere and the probe
+    # spammed dashboards with DNS failures.
+    probe_targets: []
     scrape_interval: 30s
 # ====================================================================
 # Storage (per ADR-02)

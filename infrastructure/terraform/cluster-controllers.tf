@@ -25,6 +25,20 @@ provider "helm" {
   }
 }
 
+# kubernetes provider for the raw K8s resources we manage from terraform
+# (e.g. kubernetes_secret holding the Grafana Cloud token consumed by Alloy).
+# Same auth shape as the helm provider's embedded kubernetes{} block.
+provider "kubernetes" {
+  host                   = aws_eks_cluster.main.endpoint
+  cluster_ca_certificate = base64decode(aws_eks_cluster.main.certificate_authority[0].data)
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args        = ["eks", "get-token", "--cluster-name", aws_eks_cluster.main.name]
+  }
+}
+
 # AWS Load Balancer Controller — manages ALB target group bindings (TGB) for
 # the application gateways and supports the Strangler Fig migration pattern
 # (per ADR-05) by allowing per-tenant target group cutovers.
@@ -98,6 +112,17 @@ resource "helm_release" "kyverno" {
 # kube-prometheus-stack — Prometheus + Alertmanager + Grafana operator stack.
 # Per ADR-06 the in-cluster stack is the source of truth for short-window
 # observability; long-term goes to Grafana Cloud (see grafana-cloud.tf).
+#
+# remoteWrite forwards in-cluster Prometheus samples to Grafana Cloud Mimir.
+# Without this, dashboards over in grafana-cloud.tf show "No data" forever
+# because the data path stops at the in-cluster Prometheus — ServiceMonitor
+# scrapes work fine, but the samples never leave the cluster.
+#
+# Auth = Grafana Cloud basic-auth: username is the stack's numeric
+# prometheus_user_id, password is var.grafana_cloud_token (scope must
+# include metrics:write per runbook 04 § 2). The URL gets the /push
+# suffix appended — grafana_cloud_stack.main.prometheus_url returns the
+# query base, remote_write needs the push endpoint.
 resource "helm_release" "kube_prometheus_stack" {
   name             = "kube-prometheus-stack"
   repository       = "https://prometheus-community.github.io/helm-charts"
@@ -105,6 +130,21 @@ resource "helm_release" "kube_prometheus_stack" {
   version          = "56.6.2" # TODO ADR-09: pin to chart digest
   namespace        = "monitoring"
   create_namespace = true
+
+  set {
+    name  = "prometheus.prometheusSpec.remoteWrite[0].url"
+    value = "${grafana_cloud_stack.main.prometheus_url}/push"
+  }
+
+  set {
+    name  = "prometheus.prometheusSpec.remoteWrite[0].basicAuth.username.value"
+    value = tostring(grafana_cloud_stack.main.prometheus_user_id)
+  }
+
+  set_sensitive {
+    name  = "prometheus.prometheusSpec.remoteWrite[0].basicAuth.password.value"
+    value = var.grafana_cloud_token
+  }
 
   depends_on = [helm_release.aws_load_balancer_controller]
 }
@@ -239,9 +279,9 @@ resource "helm_release" "velero" {
 # Karpenter — stateless tier auto-scaling (per ADR-02 mode-aware horizontal
 # scaling). Stateful tier remains on fixed per-AZ MNGs.
 resource "helm_release" "karpenter" {
-  name             = "karpenter"
-  repository       = "oci://public.ecr.aws/karpenter"
-  chart            = "karpenter"
+  name       = "karpenter"
+  repository = "oci://public.ecr.aws/karpenter"
+  chart      = "karpenter"
   # v0.34.4 dropped from ECR public. Pinned to the last v0.x line to
   # avoid the v1.x CRD migration (karpenter.sh/v1alpha5 → v1) which
   # requires manifest rewrites in NodePool / EC2NodeClass elsewhere.
