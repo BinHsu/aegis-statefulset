@@ -19,6 +19,12 @@ spec:
       port: 8080
       targetPort: 8080
       protocol: TCP
+    # The application's own /metrics (Go runtime + aegis_data_ops_total).
+    # Scraped by ServiceMonitor in templates/servicemonitor-app.yaml.
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
     # Per-tenant size telemetry endpoint (per ADR-01).
     # Scraped by ServiceMonitor in templates/servicemonitor-telemetry.yaml.
     # Only meaningful when relocation.telemetry.source == "sidecar"; the port

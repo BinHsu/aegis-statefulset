@@ -1,8 +1,8 @@
 {{- /*
   ServiceMonitor for the per-tenant telemetry sidecar (per ADR-01).
 
-  Scrapes :9091/metrics on every primary pod (selector matches
-  app.kubernetes.io/component=stateful-data + role=primary).
+  Scrapes the sidecar's metrics-tenant port (:9091) via the headless
+  service. The selector matches SERVICE labels, not pod labels.
 
   Skipped when relocation.telemetry.source != "sidecar" because there
   is no sidecar to scrape in that mode.
@@ -17,11 +17,12 @@ metadata:
     {{- include "aegis-statefulset.labels" . | nindent 4 }}
     app.kubernetes.io/component: telemetry
 spec:
+  # ServiceMonitor selector matches SERVICE labels (the headless
+  # service), not per-pod labels — aegis.io/role does not belong here.
   selector:
     matchLabels:
       {{- include "aegis-statefulset.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: stateful-data
-      aegis.io/role: primary
   endpoints:
     - port: metrics-tenant
       interval: 30s

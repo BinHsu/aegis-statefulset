@@ -107,9 +107,19 @@ func routes(dataDir string) *http.ServeMux {
 		}
 	})
 
+	// /healthz — liveness: the process is up and serving.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
+	})
+
+	// /ready — readiness: the pod can take traffic. The helm chart's
+	// startup + readiness probes target this path. For the POC mock,
+	// readiness == liveness (no warm-up state); a real LevelDB-backed
+	// app would gate this on MemTable rebuild completion.
+	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ready"))
 	})
 
 	return mux

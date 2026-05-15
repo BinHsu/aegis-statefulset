@@ -47,11 +47,12 @@ stateful:
   # and update digest below.
   image:
     repository: 251774439261.dkr.ecr.eu-central-1.amazonaws.com/aegis-statefulset-mock
-    # v0.2.0-otel — the OTel-instrumented build (otelhttp + manual spans +
-    # /metrics + slog/trace_id). Verified end-to-end against Grafana Cloud
-    # Tempo on the staging cluster 2026-05-15.
-    tag: "v0.2.0-otel"
-    digest: "sha256:0f1a9836cf2971167fd243f1a608d7c26a923f38681fcb91db4454dec4cb4de5"
+    # v0.2.1-otel — OTel-instrumented build (otelhttp + manual spans +
+    # /metrics + slog/trace_id) plus the /ready endpoint the chart's
+    # startup + readiness probes target. Verified end-to-end against
+    # Grafana Cloud (Mimir / Loki / Tempo) on the staging cluster 2026-05-15.
+    tag: "v0.2.1-otel"
+    digest: "sha256:35fa7807321c43c16ee9a9ce2c370889cb8fe4ca09ccd9c51f017540e8484d50"
     pullPolicy: IfNotPresent
   resources:
     requests:

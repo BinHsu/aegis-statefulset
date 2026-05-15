@@ -160,6 +160,21 @@ resource "helm_release" "kube_prometheus_stack" {
   namespace        = kubernetes_namespace.monitoring.metadata[0].name
   create_namespace = false
 
+  # Scrape ServiceMonitors / PodMonitors cluster-wide, not just those
+  # carrying the kube-prometheus-stack release label. The default
+  # (selectorNilUsesHelmValues = true) scopes Prometheus to its own
+  # release's monitors, so the application chart's ServiceMonitors in
+  # the aegis-app namespace would never be scraped.
+  set {
+    name  = "prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues"
+    value = "false"
+  }
+
+  set {
+    name  = "prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues"
+    value = "false"
+  }
+
   set {
     name  = "prometheus.prometheusSpec.remoteWrite[0].url"
     value = "${grafana_cloud_stack.main.prometheus_url}/push"

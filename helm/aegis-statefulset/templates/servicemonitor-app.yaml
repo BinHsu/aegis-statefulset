@@ -20,11 +20,13 @@ metadata:
     {{- include "aegis-statefulset.labels" . | nindent 4 }}
     app.kubernetes.io/component: app-metrics
 spec:
+  # A ServiceMonitor selector matches SERVICE labels, not pod labels —
+  # this targets the headless service (templates/headless-service.yaml).
+  # aegis.io/role is a per-pod label and must not appear here.
   selector:
     matchLabels:
       {{- include "aegis-statefulset.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: stateful-data
-      aegis.io/role: primary
   endpoints:
     - port: metrics
       interval: {{ .Values.observability.service_monitor.interval }}

@@ -256,6 +256,22 @@ func TestHealthz_Returns200(t *testing.T) {
 	}
 }
 
+func TestReady_Returns200(t *testing.T) {
+	// The helm chart's startup + readiness probes target /ready; the pod
+	// never becomes Ready if this endpoint is missing.
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/ready")
+	if err != nil {
+		t.Fatalf("GET /ready failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("/ready — got %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+}
+
 // ---- Documented limitation: no path-traversal check on key --------------
 //
 // The mock allows keys containing ".." or "/" — these would write outside
