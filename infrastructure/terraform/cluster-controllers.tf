@@ -175,6 +175,18 @@ resource "helm_release" "kube_prometheus_stack" {
     value = "false"
   }
 
+  # kube-state-metrics emits the kube_<resource>_labels metrics ONLY for
+  # label keys named in --metric-labels-allowlist. With the default
+  # (empty) allowlist, kube_node_labels produces zero series — so any
+  # dashboard query that joins on node zone via
+  # `kube_node_labels{label_topology_kubernetes_io_zone}` (e.g. the
+  # "Node Ready count by AZ" panel) returns nothing. Allowlist the
+  # topology labels so the join resolves.
+  set {
+    name  = "kube-state-metrics.metricLabelsAllowlist[0]"
+    value = "nodes=[topology.kubernetes.io/zone,topology.kubernetes.io/region]"
+  }
+
   # Mimir's remote-write ingest path is /api/prom/push — NOT /push.
   # prometheus_url is the query base; appending only /push 404s and every
   # sample is dropped (the failure is silent in remote_storage_samples_total,
