@@ -175,9 +175,13 @@ resource "helm_release" "kube_prometheus_stack" {
     value = "false"
   }
 
+  # Mimir's remote-write ingest path is /api/prom/push — NOT /push.
+  # prometheus_url is the query base; appending only /push 404s and every
+  # sample is dropped (the failure is silent in remote_storage_samples_total,
+  # which counts enqueued, not delivered — check samples_failed_total).
   set {
     name  = "prometheus.prometheusSpec.remoteWrite[0].url"
-    value = "${grafana_cloud_stack.main.prometheus_url}/push"
+    value = "${grafana_cloud_stack.main.prometheus_url}/api/prom/push"
   }
 
   # basicAuth on the Prometheus CRD takes a SecretKeySelector (name +

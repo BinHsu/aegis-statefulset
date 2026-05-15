@@ -33,7 +33,7 @@
       "title": "Node Ready count by AZ",
       "description": "Ready nodes per AZ. The stateful tier runs in the master AZ only; the other two AZs hold warm-standby capacity. A drop in the master AZ is the trigger for AZ rotation per ADR-04.",
       "type": "timeseries",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "datasource": {"type": "prometheus", "uid": "aegis-mimir"},
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
       "targets": [
         {
@@ -55,7 +55,7 @@
       "title": "Pod restart rate (rolling 1h)",
       "description": "Pod restarts per hour. Rate above the alert threshold means CrashLoopBackOff is outpacing kubelet's auto-recovery and operator action is needed. The threshold sits at 5/h to keep the panel quiet during normal rolling deploys.",
       "type": "timeseries",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "datasource": {"type": "prometheus", "uid": "aegis-mimir"},
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
       "targets": [
         {
@@ -85,7 +85,7 @@
       "title": "PV attach / detach latency (P50 / P99)",
       "description": "Time between PV attach request and the volume becoming usable. P99 spikes above 5 minutes are the EBS-CSI attach-detach stuck case (Tier 2e). Operator runs scripts/dr/force-detach-pv.sh after confirming the previous instance is dead.",
       "type": "timeseries",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "datasource": {"type": "prometheus", "uid": "aegis-mimir"},
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
       "targets": [
         {
@@ -120,7 +120,7 @@
       "title": "Karpenter consolidation events (rolling 24h)",
       "description": "Count of Karpenter consolidation actions per hour. High activity is normal for stateless workloads with spot mix. Sudden zero may mean the Karpenter controller has crashed; sudden spike may indicate cost-runaway in stateless capacity.",
       "type": "timeseries",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "datasource": {"type": "prometheus", "uid": "aegis-mimir"},
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
       "targets": [
         {
@@ -142,7 +142,7 @@
       "title": "Pending pods — scheduler backlog",
       "description": "Pods stuck in Pending state. Stateful pods stuck means the EBS-CSI attach is wedged or no node satisfies the AZ constraint. Stateless stuck means Karpenter is slow to provision and capacity is tight.",
       "type": "stat",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "datasource": {"type": "prometheus", "uid": "aegis-mimir"},
       "gridPos": {"h": 6, "w": 24, "x": 0, "y": 16},
       "targets": [
         {

@@ -12,14 +12,14 @@
         "type": "dashboard"
       },
       {
-        "datasource": "${DS_PROMETHEUS}",
+        "datasource": "aegis-mimir",
         "enable": true,
         "iconColor": "orange",
         "name": "Relocation events",
         "expr": "changes(aegis_placement_state_transitions_total[5m]) > 0"
       },
       {
-        "datasource": "${DS_PROMETHEUS}",
+        "datasource": "aegis-mimir",
         "enable": true,
         "iconColor": "yellow",
         "name": "Capacity expansions",
@@ -63,7 +63,7 @@
       "type": "heatmap",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "aegis-mimir"
       },
       "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
       "targets": [
@@ -95,7 +95,7 @@
       "type": "table",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "aegis-mimir"
       },
       "gridPos": {"h": 10, "w": 12, "x": 0, "y": 8},
       "targets": [
@@ -127,7 +127,7 @@
       "type": "table",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "aegis-mimir"
       },
       "gridPos": {"h": 10, "w": 12, "x": 12, "y": 8},
       "targets": [
@@ -160,7 +160,7 @@
       "type": "table",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "aegis-mimir"
       },
       "gridPos": {"h": 10, "w": 12, "x": 0, "y": 18},
       "targets": [
@@ -238,7 +238,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "aegis-mimir"
       },
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 38},
       "targets": [
@@ -272,7 +272,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "aegis-mimir"
       },
       "gridPos": {"h": 8, "w": 6, "x": 12, "y": 38},
       "targets": [
@@ -315,7 +315,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "aegis-mimir"
       },
       "gridPos": {"h": 8, "w": 6, "x": 18, "y": 38},
       "targets": [
@@ -339,7 +339,7 @@
       "type": "bargauge",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "aegis-mimir"
       },
       "gridPos": {"h": 8, "w": 24, "x": 0, "y": 46},
       "targets": [

@@ -12,7 +12,7 @@
         "type": "dashboard"
       },
       {
-        "datasource": "${DS_PROMETHEUS}",
+        "datasource": "aegis-mimir",
         "enable": true,
         "iconColor": "blue",
         "name": "Relocation events",
@@ -42,7 +42,7 @@
       "title": "Top 10 tenants by request rate",
       "description": "Per-tenant request rate over the last 5 minutes, sorted high-to-low. The top of this list is where customer impact is concentrated. Sudden new entry to the top means a tenant has changed traffic shape — investigate before the cell saturates.",
       "type": "table",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "datasource": {"type": "prometheus", "uid": "aegis-mimir"},
       "gridPos": {"h": 10, "w": 12, "x": 0, "y": 0},
       "targets": [
         {
@@ -69,7 +69,7 @@
       "title": "Top 10 tenants by IOPS share (% of cell capacity)",
       "description": "Per-tenant share of the cell's EBS IOPS. A tenant above 70% is the hot-spot definition in automation-tiers.md Tier 2d. Sustained 70%+ means the tenant is starving the rest of the cell — relocation candidate.",
       "type": "table",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "datasource": {"type": "prometheus", "uid": "aegis-mimir"},
       "gridPos": {"h": 10, "w": 12, "x": 12, "y": 0},
       "targets": [
         {
@@ -101,7 +101,7 @@
       "title": "Per-tenant storage growth — last 24h",
       "description": "Storage delta per tenant over the last 24 hours. Used for capacity-plan forecasting. A tenant with sustained growth above the cell's headroom budget is the cell-expansion trigger per ADR-04 + automation-tiers.md Tier 2c.",
       "type": "timeseries",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "datasource": {"type": "prometheus", "uid": "aegis-mimir"},
       "gridPos": {"h": 8, "w": 24, "x": 0, "y": 10},
       "targets": [
         {
@@ -123,7 +123,7 @@
       "title": "Hot-spot indicator — tenants over threshold",
       "description": "Count of tenants currently above the 70% IOPS or storage threshold. Zero means no hot-spot. Above zero is the trigger to consult the relocation runbook. The number does not mean those tenants will move — that is a scheduling decision.",
       "type": "stat",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "datasource": {"type": "prometheus", "uid": "aegis-mimir"},
       "gridPos": {"h": 6, "w": 12, "x": 0, "y": 18},
       "targets": [
         {
@@ -153,7 +153,7 @@
       "title": "Relocation eligibility — tenants by readiness",
       "description": "Per-tenant readiness for relocation: backup-fresh, no in-flight write, target cell has headroom. Operators read this panel before triggering scripts/relocation/per-tenant-relocate.sh. A tenant flagged ineligible has a specific reason in the table label.",
       "type": "table",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "datasource": {"type": "prometheus", "uid": "aegis-mimir"},
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 18},
       "targets": [
         {
