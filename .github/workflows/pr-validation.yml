@@ -96,7 +96,9 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@a1502cd9e758c50496cc9ac5308c4843bcd56d36  # v3.0.0
         with:
-          terraform_version: '1.6.6'
+          # Must satisfy versions.tf required_version (>= 1.10, for native
+          # S3 backend locking). Matches the local dev / cold-apply toolchain.
+          terraform_version: '1.14.8'
 
       - name: Terraform fmt + validate (ADR-037)
         run: |
