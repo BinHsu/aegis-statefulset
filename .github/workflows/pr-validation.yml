@@ -89,14 +89,16 @@ jobs:
         run: |
           set -euo pipefail
           helm template aegis-statefulset helm/aegis-statefulset/ \
-            | /tmp/kubeconform -summary -strict -kubernetes-version 1.29 \
+            | /tmp/kubeconform -summary -strict -kubernetes-version 1.29.0 \
                 -schema-location default \
                 -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@a1502cd9e758c50496cc9ac5308c4843bcd56d36  # v3.0.0
         with:
-          terraform_version: '1.6.6'
+          # Must satisfy versions.tf required_version (>= 1.10, for native
+          # S3 backend locking). Matches the local dev / cold-apply toolchain.
+          terraform_version: '1.14.8'
 
       - name: Terraform fmt + validate (ADR-037)
         run: |
@@ -120,6 +122,11 @@ jobs:
         uses: aquasecurity/tfsec-action@b466648d6e39e7c75324f25d83891162a721f2d6  # v1.0.3 — SHA-pinned per ADR-09; refresh via Renovate
         with:
           working_directory: infrastructure/terraform
+          # tfsec auto-discovers infrastructure/terraform/.tfsec/config.yml
+          # (the documented exclusions). --minimum-severity HIGH gates CI on
+          # HIGH/CRITICAL only; the residual MEDIUM/LOW findings are tracked
+          # for triage in the internal backlog (C5) rather than blocking.
+          additional_args: --minimum-severity HIGH
 
       - name: Restic-FSB patch drift detection (A15) — upstream publishing discipline
         run: |

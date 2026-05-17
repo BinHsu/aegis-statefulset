@@ -54,6 +54,10 @@ variable "stateful_pool_per_az_size" {
   default     = 3
 }
 
+# Consumed by the ACM + Route 53 resources in alb.tf, which stay commented
+# until the DR cutover (ADR-04); the value is live in terraform.tfvars so the
+# scaffold is ready to wire.
+# tflint-ignore: terraform_unused_declarations
 variable "domain_name" {
   description = "Domain for ALB / Route 53 (anonymised in POC)"
   type        = string
@@ -96,6 +100,12 @@ variable "finops_alert_emails" {
 
 # ====================================================================
 # Warm-standby + DR cutover variables (per ADR-04)
+#
+# The traffic-weight + dr_region_alb_* variables below are DR-cutover
+# scaffold: their values are live in terraform.tfvars, but the Route 53
+# weighted records that consume them live in alb.tf commented out until
+# a DR region exists. The tflint-ignore lines keep
+# `terraform_unused_declarations` from flagging that intentional scaffold.
 # ====================================================================
 
 variable "master_az" {
@@ -116,24 +126,32 @@ variable "stateless_pool_size" {
   default     = 3
 }
 
+# DR-cutover scaffold (see section header).
+# tflint-ignore: terraform_unused_declarations
 variable "primary_traffic_weight" {
   description = "Route 53 weight for primary region (set 0 to drain) (per ADR-04)"
   type        = number
   default     = 100
 }
 
+# DR-cutover scaffold (see section header).
+# tflint-ignore: terraform_unused_declarations
 variable "dr_traffic_weight" {
   description = "Route 53 weight for DR region (set 100 for cutover) (per ADR-04)"
   type        = number
   default     = 0
 }
 
+# DR-cutover scaffold (see section header).
+# tflint-ignore: terraform_unused_declarations
 variable "dr_region_alb_dns" {
   description = "DR region ALB DNS (cross-region output, empty disables DR record) (per ADR-04)"
   type        = string
   default     = ""
 }
 
+# DR-cutover scaffold (see section header).
+# tflint-ignore: terraform_unused_declarations
 variable "dr_region_alb_zone_id" {
   description = "DR region ALB Route 53 zone ID (cross-region output) (per ADR-04)"
   type        = string

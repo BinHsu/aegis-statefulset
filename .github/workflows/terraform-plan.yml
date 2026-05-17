@@ -10,6 +10,16 @@
 #   - Posts a summary comment on the PR with resource adds/changes/destroys
 #   - Does NOT auto-apply; apply is a separate manual workflow with branch
 #     protection on main (out of scope for this file)
+#
+# Activation gate:
+#   The plan job needs AWS OIDC — a GitHub OIDC identity provider in the
+#   AWS account plus the read-only role whose ARN is the repository secret
+#   TERRAFORM_PLAN_ROLE_ARN (the AWS bootstrap, internal backlog B4).
+#   Until that bootstrap is done the job skips cleanly (shows as skipped,
+#   not failed) instead of erroring on missing credentials on every PR —
+#   the same conditional-skip posture as codeql.yml. To activate: complete
+#   the OIDC bootstrap, set the TERRAFORM_PLAN_ROLE_ARN secret, and set the
+#   repository variable ENABLE_TERRAFORM_PLAN to "true".
 
 name: Terraform Plan
 
@@ -28,6 +38,10 @@ permissions:
 jobs:
   plan:
     name: Terraform plan
+    # Skips cleanly until the AWS OIDC bootstrap (backlog B4) is done — see
+    # the activation gate in the header. The role ARN stays a secret (it
+    # carries the AWS account ID); the gate is a non-sensitive boolean var.
+    if: ${{ vars.ENABLE_TERRAFORM_PLAN == 'true' }}
     runs-on: ubuntu-22.04
     defaults:
       run:
@@ -46,7 +60,8 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@a1502cd9e758c50496cc9ac5308c4843bcd56d36  # v3.0.0
         with:
-          terraform_version: '1.6.6'
+          # Must satisfy versions.tf required_version (>= 1.10).
+          terraform_version: '1.14.8'
 
       - name: Terraform init
         run: terraform init

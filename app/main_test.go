@@ -4,7 +4,8 @@
 // every input domain with a meaningful boundary B is exercised at B-1, B,
 // and B+1. The mock's input boundaries are:
 //
-//   - Key length  (empty = 0 chars vs single char vs long key)
+//   - Key length  (empty = 0 chars vs single char vs 128-char max vs 129)
+//   - Key safety  (valid path element vs traversal / separator / leading dot)
 //   - Value size  (empty body vs single byte vs large value)
 //   - HTTP method (POST/GET supported, others 405)
 //   - Endpoint    (/data vs /healthz vs unknown)
@@ -20,6 +21,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -64,20 +66,39 @@ func TestPost_KeySingleChar_Returns204(t *testing.T) {
 	}
 }
 
-func TestPost_KeyLong_Returns204(t *testing.T) {
+func TestPost_KeyMaxLength_Returns204(t *testing.T) {
+	// 128 chars — the maximum keyPattern admits (boundary B). B-1 and B+1
+	// are covered at the unit level by TestValidKey; this is the B point
+	// exercised end-to-end through the handler.
 	srv := newTestServer(t)
 	defer srv.Close()
 
-	// 200 chars — comfortably inside ext4 / xfs single-name limit (255)
-	longKey := strings.Repeat("k", 200)
-	body := bytes.NewBufferString(`{"key":"` + longKey + `","value":"v"}`)
+	maxKey := strings.Repeat("k", 128)
+	body := bytes.NewBufferString(`{"key":"` + maxKey + `","value":"v"}`)
 	resp, err := http.Post(srv.URL+"/data", "application/json", body)
 	if err != nil {
 		t.Fatalf("POST failed: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
-		t.Errorf("200-char key — got %d, want %d", resp.StatusCode, http.StatusNoContent)
+		t.Errorf("128-char key — got %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+}
+
+func TestPost_KeyTooLong_Returns400(t *testing.T) {
+	// 129 chars — one past the keyPattern maximum (boundary B+1).
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	tooLong := strings.Repeat("k", 129)
+	body := bytes.NewBufferString(`{"key":"` + tooLong + `","value":"v"}`)
+	resp, err := http.Post(srv.URL+"/data", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("129-char key — got %d, want %d", resp.StatusCode, http.StatusBadRequest)
 	}
 }
 
@@ -272,23 +293,83 @@ func TestReady_Returns200(t *testing.T) {
 	}
 }
 
-// ---- Documented limitation: no path-traversal check on key --------------
+// ---- Path-traversal hardening (CodeQL go/path-injection) ----------------
 //
-// The mock allows keys containing ".." or "/" — these would write outside
-// /data on a real filesystem mount. This is an EXPLICIT non-goal of the
-// POC mock per the file header: smallest object that exercises the
-// operational shape. A real LevelDB implementation has no such surface
-// (LevelDB's API takes opaque byte strings, not file paths). Documented
-// here so a future maintainer doesn't waste time hardening a placeholder.
-//
-// If someone does want to harden later: add a `filepath.Clean(key)` +
-// `strings.HasPrefix(filepath.Join(dataDir, cleaned), dataDir+"/")` guard
-// to /data POST and GET. ~5 lines.
+// The key from the HTTP request is validated against keyPattern before it
+// reaches filepath.Join — a key containing "..", a path separator, or a
+// leading dot is rejected with 400 instead of escaping the data directory.
+// TestValidKey gives the unit-level boundary coverage; the two tests below
+// are the end-to-end POST/GET assertions through the handler.
 
-func TestSecurityLimitation_PathTraversal_DocumentedNonGoal(t *testing.T) {
-	// This test documents the known limitation rather than enforcing the
-	// strict behaviour. Skipped to avoid red CI; the assertion would be
-	// "POST with key ../foo returns 4xx". Unskip when the mock is replaced
-	// by the real LevelDB-backed app or when the guard is added.
-	t.Skip("path traversal hardening is out of scope for the POC mock; see file comment")
+// traversalKeys are keys that must never reach the filesystem — "/" makes
+// a multi-component path, ".." / leading-dot are the traversal primitives.
+var traversalKeys = []string{"../etc/passwd", "../../secret", "a/b", "..", ".", ".hidden"}
+
+func TestPost_KeyPathTraversal_Returns400(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	for _, key := range traversalKeys {
+		payload, _ := json.Marshal(map[string]string{"key": key, "value": "v"})
+		resp, err := http.Post(srv.URL+"/data", "application/json", bytes.NewReader(payload))
+		if err != nil {
+			t.Fatalf("POST %q failed: %v", key, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("traversal key %q — got %d, want %d", key, resp.StatusCode, http.StatusBadRequest)
+		}
+	}
+}
+
+func TestGet_KeyPathTraversal_Returns400(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	for _, key := range traversalKeys {
+		resp, err := http.Get(srv.URL + "/data?key=" + url.QueryEscape(key))
+		if err != nil {
+			t.Fatalf("GET %q failed: %v", key, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("traversal key %q — got %d, want %d", key, resp.StatusCode, http.StatusBadRequest)
+		}
+	}
+}
+
+// ---- validKey — unit boundary coverage ----------------------------------
+//
+// keyPattern admits 1..128 characters, alphanumeric-led, drawn from
+// [A-Za-z0-9._-]. The length boundary is exercised at min (1) and max
+// (128), each with its ±1 neighbour, per CLAUDE.md guardrail (k).
+
+func TestValidKey(t *testing.T) {
+	cases := []struct {
+		name string
+		key  string
+		want bool
+	}{
+		{"empty — len 0, below min", "", false},
+		{"single char — len 1, min", "k", true},
+		{"len 2 — min+1", "ab", true},
+		{"len 127 — max-1", strings.Repeat("k", 127), true},
+		{"len 128 — max", strings.Repeat("k", 128), true},
+		{"len 129 — max+1", strings.Repeat("k", 129), false},
+		{"dot-dot", "..", false},
+		{"single dot", ".", false},
+		{"leading dot", ".hidden", false},
+		{"forward slash", "a/b", false},
+		{"backslash", `a\b`, false},
+		{"traversal", "../../etc/passwd", false},
+		{"dots in the middle — safe", "a..b", true},
+		{"dashes, underscores, dots — safe", "my_key-1.v2", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := validKey(tc.key); got != tc.want {
+				t.Errorf("validKey(%q) = %v, want %v", tc.key, got, tc.want)
+			}
+		})
+	}
 }
