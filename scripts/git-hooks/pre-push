@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# scripts/git-hooks/pre-push — comprehensive local gate.
+#
+# Two-tier hook design (mirrors the CI layering):
+#
+#   pre-commit  fast gate   — anonymisation + secrets + kubeconform.
+#                             Runs on every commit; finishes in seconds
+#                             so there is no temptation to --no-verify.
+#   pre-push    full gate   — this file. Runs `make prepush`, the last
+#                             gate before code leaves the machine:
+#                             whole-repo anonymisation re-scan, the Go
+#                             app suite (gofmt / vet / test -race /
+#                             build / govulncheck), golangci-lint,
+#                             helm lint, terraform fmt.
+#
+# `make prepush` reuses the same checks CI runs in pr-validation.yml, so
+# "passes locally" predicts "passes CI" — the green-light discipline in
+# CLAUDE.md (m). CI then repeats them and adds the container build,
+# Trivy scan, and CodeQL.
+#
+# Install (once per clone):  make hooks-install
+# Bypass with `git push --no-verify` only when you understand why.
+
+set -euo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+if ! command -v make >/dev/null 2>&1; then
+    echo "[pre-push] FAIL — 'make' not found in PATH" >&2
+    exit 1
+fi
+
+exec make prepush

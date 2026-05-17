@@ -64,9 +64,9 @@ func setupTracing(ctx context.Context) (shutdown func(context.Context) error, er
 			semconv.ServiceName(serviceName),
 			semconv.ServiceVersion(versionFromEnv()),
 		),
-		resource.WithFromEnv(),     // picks up OTEL_RESOURCE_ATTRIBUTES (k8s pod name etc.)
-		resource.WithProcess(),     // pid, runtime
-		resource.WithHost(),        // hostname
+		resource.WithFromEnv(),      // picks up OTEL_RESOURCE_ATTRIBUTES (k8s pod name etc.)
+		resource.WithProcess(),      // pid, runtime
+		resource.WithHost(),         // hostname
 		resource.WithTelemetrySDK(), // SDK identity
 	)
 	if err != nil {

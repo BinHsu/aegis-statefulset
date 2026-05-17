@@ -6,6 +6,9 @@
 #   - ADR-037 (Terraform fmt / validate / tflint / tfsec)
 #   - ADR-032 (Trivy vulnerability scan)
 #   - ADR-039 (SHA-pinned third-party actions)
+#   - Go application gate (gofmt / vet / test -race / build / govulncheck
+#     for app/ — the mock workload is the only application code in the
+#     submission and ships with tests; this job is what enforces them)
 #
 # All third-party actions are pinned to commit SHAs per ADR-039.
 # When updating, run Renovate or `gh api` to fetch and verify the SHA.
@@ -160,3 +163,57 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: '1'
           ignore-unfixed: true
+
+  # Go application gate. The mock workload under app/ is the only
+  # application code in the submission and ships with main_test.go +
+  # observability_test.go — without this job those tests are never run.
+  # Runs as a separate job so it parallelises with the lint/validate job.
+  #
+  # Scope is deliberately the deterministic toolchain checks (gofmt, vet,
+  # build, test, govulncheck): each is reproducible and stays green unless
+  # there is a real defect or a newly-disclosed CVE in a dependency.
+  # golangci-lint is intentionally left to the local pre-push hook — its
+  # ruleset shifts between releases, which would turn CI red on a tooling
+  # bump rather than a code change (see scripts/git-hooks/pre-push).
+  go-app:
+    name: Go app — gofmt, vet, test, vuln
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0 — SHA-pinned per ADR-09; refresh via Renovate
+        with:
+          # go-version-file is resolved from the repo root, so the path
+          # is app/go.mod even though steps run with working-directory: app.
+          go-version-file: app/go.mod
+
+      - name: gofmt
+        run: |
+          set -euo pipefail
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt — run 'gofmt -w app/' on:"
+            echo "$unformatted"
+            exit 1
+          fi
+          echo "OK: gofmt clean."
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test (race detector)
+        run: go test ./... -race -count=1
+
+      - name: go build
+        run: go build ./...
+
+      - name: govulncheck
+        # @latest is acceptable for a scanner: a tool bump only changes
+        # which known CVEs are reported, and a red result here means a
+        # real advisory to act on — the intended behaviour.
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

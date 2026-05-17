@@ -1,0 +1,40 @@
+# Dependency Review — PR-time supply-chain gate.
+#
+# Implements:
+#   - ADR-09 (supply chain — block vulnerable / incompatible deps at the PR)
+#   - ADR-039 (SHA-pinned third-party actions)
+#
+# Blocks a pull request that introduces a dependency with a known HIGH+
+# vulnerability or an incompatible licence before the change reaches
+# main. Diff-scoped — it only reviews what the PR adds, so it is fast
+# and produces no noise on unrelated dependencies.
+#
+# This complements the other supply-chain controls:
+#   - govulncheck (pr-validation.yml) — CVEs in the resolved Go deps
+#   - Trivy fs scan (pr-validation.yml) — CVEs across the working tree
+#   - Renovate — keeps deps current via automated bump PRs
+#   - sbom-attestation.yml — SBOM + provenance on release
+# Dependency review is the gate that stops a *new* bad dep getting in;
+# the others catch what is already there.
+
+name: Dependency Review
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    name: Dependency review
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - name: Dependency review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294  # v5.0.0 — SHA-pinned per ADR-09; refresh via Renovate
+        with:
+          fail-on-severity: high
