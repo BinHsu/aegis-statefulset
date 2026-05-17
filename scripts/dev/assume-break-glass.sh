@@ -46,7 +46,6 @@ fi
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$_SCRIPT_PATH")" && pwd)"
-PROJ_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # ============================================================================
 # Required inputs
