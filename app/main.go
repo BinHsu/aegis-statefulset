@@ -50,6 +50,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"syscall"
 	"time"
 
@@ -61,6 +62,26 @@ import (
 )
 
 const defaultDataDir = "/data"
+
+// errInvalidKey is returned by writeKey/readKey when the key would not be
+// a safe single filesystem path element. The handler maps it to 400.
+var errInvalidKey = errors.New("invalid key")
+
+// keyPattern admits exactly one safe path element: an alphanumeric first
+// character followed by up to 127 alphanumerics / dot / dash / underscore.
+// It rejects the empty string, "." and ".." (the leading character must be
+// alphanumeric), and anything containing a path separator. That closes the
+// traversal vector where a request key like "../../etc/passwd" would escape
+// the data directory — CodeQL go/path-injection. A real LevelDB app keys on
+// opaque byte strings and has no such surface; this mock writes one file
+// per key, so it must validate the key before touching the filesystem.
+var keyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
+// validKey reports whether key is a safe single path element (see
+// keyPattern). It is the path-traversal barrier for writeKey/readKey.
+func validKey(key string) bool {
+	return keyPattern.MatchString(key)
+}
 
 // routes builds the HTTP mux. Exposed for tests; main() wraps it in otelhttp
 // before binding to :8080 so each request has a root span before reaching
@@ -84,6 +105,10 @@ func routes(dataDir string) *http.ServeMux {
 				return
 			}
 			if err := writeKey(ctx, dataDir, body.Key, body.Value); err != nil {
+				if errors.Is(err, errInvalidKey) {
+					http.Error(w, "Invalid key", http.StatusBadRequest)
+					return
+				}
 				http.Error(w, "Write failed", http.StatusInternalServerError)
 				return
 			}
@@ -97,6 +122,10 @@ func routes(dataDir string) *http.ServeMux {
 			}
 			data, err := readKey(ctx, dataDir, key)
 			if err != nil {
+				if errors.Is(err, errInvalidKey) {
+					http.Error(w, "Invalid key", http.StatusBadRequest)
+					return
+				}
 				http.NotFound(w, r)
 				return
 			}
@@ -136,6 +165,14 @@ func writeKey(ctx context.Context, dataDir, key, value string) error {
 	))
 	defer span.End()
 
+	// Path-traversal barrier — reject any key that is not a safe single
+	// path element before it reaches filepath.Join (CodeQL go/path-injection).
+	if !validKey(key) {
+		span.SetStatus(codes.Error, "invalid key")
+		dataOpsTotal.WithLabelValues("write", "err").Inc()
+		return errInvalidKey
+	}
+
 	if err := os.WriteFile(filepath.Join(dataDir, key), []byte(value), 0o644); err != nil {
 		span.SetStatus(codes.Error, "write failed")
 		span.RecordError(err)
@@ -154,6 +191,13 @@ func readKey(ctx context.Context, dataDir, key string) ([]byte, error) {
 		attribute.Int("key.length", len(key)),
 	))
 	defer span.End()
+
+	// Path-traversal barrier — see writeKey.
+	if !validKey(key) {
+		span.SetStatus(codes.Error, "invalid key")
+		dataOpsTotal.WithLabelValues("read", "err").Inc()
+		return nil, errInvalidKey
+	}
 
 	data, err := os.ReadFile(filepath.Join(dataDir, key))
 	if err != nil {
