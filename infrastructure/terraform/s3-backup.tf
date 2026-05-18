@@ -114,5 +114,16 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "backup_dr" {
   }
 }
 
+resource "aws_s3_bucket_logging" "backup_dr" {
+  provider = aws.dr_region
+
+  bucket = aws_s3_bucket.backup_dr.id
+
+  # Logs to the DR-region access-log bucket — server-access logging
+  # requires the target in the same region as the source.
+  target_bucket = aws_s3_bucket.access_logs_dr.id
+  target_prefix = "backup-dr/"
+}
+
 # TODO: aws_s3_bucket_replication_configuration on the source bucket pointing at DR
 #       + IAM role for the replication operator.

@@ -178,6 +178,17 @@ resource "aws_s3_bucket_lifecycle_configuration" "velero_bsl_dr" {
   }
 }
 
+resource "aws_s3_bucket_logging" "velero_bsl_dr" {
+  provider = aws.dr_region
+
+  bucket = aws_s3_bucket.velero_bsl_dr.id
+
+  # Logs to the DR-region access-log bucket — server-access logging
+  # requires the target in the same region as the source.
+  target_bucket = aws_s3_bucket.access_logs_dr.id
+  target_prefix = "velero-bsl-dr/"
+}
+
 # --------------------------------------------------------------------
 # Cross-region replication (source -> DR)
 # --------------------------------------------------------------------

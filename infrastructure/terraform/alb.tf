@@ -43,6 +43,7 @@ resource "aws_lb" "main" {
 
 resource "aws_security_group" "alb" {
   name_prefix = "aegis-statefulset-alb-"
+  description = "ALB north-south ingress (HTTPS from internet, egress to backend) per ADR-03"
   vpc_id      = module.vpc.vpc_id
 
   ingress {

@@ -123,10 +123,9 @@ jobs:
         with:
           working_directory: infrastructure/terraform
           # tfsec auto-discovers infrastructure/terraform/.tfsec/config.yml
-          # (the documented exclusions). --minimum-severity HIGH gates CI on
-          # HIGH/CRITICAL only; the residual MEDIUM/LOW findings are tracked
-          # for triage in the internal backlog (C5) rather than blocking.
-          additional_args: --minimum-severity HIGH
+          # (the documented exclusions). CI gates on every severity — the
+          # tree is clean, so anything new must be fixed or explicitly
+          # excluded in config.yml with documented rationale.
 
       - name: Restic-FSB patch drift detection (A15) — upstream publishing discipline
         run: |
