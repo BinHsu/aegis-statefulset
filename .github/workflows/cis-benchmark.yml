@@ -48,9 +48,20 @@ jobs:
           # focuses on worker-node and policy controls that match our EKS posture.
           kubectl apply -f https://raw.githubusercontent.com/aquasecurity/kube-bench/v0.7.0/job-eks.yaml
           kubectl wait --for=condition=complete --timeout=300s job/kube-bench
-          kubectl logs -l app=kube-bench --tail=-1 > kube-bench-report.txt
+          # Pull logs straight from the Job. Pods a Job spawns are NOT labelled
+          # `app=kube-bench` — only the auto `job-name=kube-bench` — so a
+          # `-l app=kube-bench` selector silently matched nothing and produced
+          # an empty report (a meaningless all-zero scan). `kubectl logs
+          # job/<name>` is selector-free and version-agnostic.
+          kubectl logs job/kube-bench --tail=-1 > kube-bench-report.txt
           echo "--- summary ---"
           tail -n 20 kube-bench-report.txt
+          # An empty report must be RED, never a false green: fail loudly if it
+          # carries no kube-bench verdict lines at all.
+          if ! grep -qE '^\[(PASS|FAIL|WARN|INFO)\]' kube-bench-report.txt; then
+            echo "::error::kube-bench produced no PASS/FAIL/WARN/INFO lines — report empty or malformed."
+            exit 1
+          fi
 
       - name: Parse CIS findings
         id: parse
