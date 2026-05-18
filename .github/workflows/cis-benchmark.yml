@@ -56,9 +56,15 @@ jobs:
         id: parse
         run: |
           set -euo pipefail
-          fail_count=$(grep -c '^\[FAIL\]' kube-bench-report.txt || echo 0)
-          warn_count=$(grep -c '^\[WARN\]' kube-bench-report.txt || echo 0)
-          pass_count=$(grep -c '^\[PASS\]' kube-bench-report.txt || echo 0)
+          # `grep -c` prints the count AND exits 1 when there are zero matches.
+          # The previous `|| echo 0` appended a *second* line, so the variable
+          # became "0\n0"; writing that to $GITHUB_OUTPUT failed with
+          # "Invalid format '0'". `|| true` keeps the single count grep emits;
+          # ${var:-0} covers the file-missing case (grep exits 2, prints nothing).
+          count() { grep -cE "$1" kube-bench-report.txt || true; }
+          fail_count=$(count '^\[FAIL\]'); fail_count=${fail_count:-0}
+          warn_count=$(count '^\[WARN\]'); warn_count=${warn_count:-0}
+          pass_count=$(count '^\[PASS\]'); pass_count=${pass_count:-0}
           echo "fail_count=$fail_count" >> "$GITHUB_OUTPUT"
           echo "warn_count=$warn_count" >> "$GITHUB_OUTPUT"
           echo "pass_count=$pass_count" >> "$GITHUB_OUTPUT"
