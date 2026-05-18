@@ -1,0 +1,20 @@
+# OWASP ZAP baseline scan — custom rule overrides
+# Consumed by .github/workflows/dast.yml (zaproxy/action-baseline).
+#
+# Format (tab-separated): <ruleId>	<WARN|FAIL|IGNORE>	<comment>
+# Lines beginning with '#' are ignored. Rules not listed keep their default
+# threshold. Keep this file alongside dast.yml and review when adding rules.
+#
+# Default posture: alert at WARN (advisory). Promote a rule to FAIL only once
+# the dev environment is stable and the finding is a true gate. IGNORE is for
+# scanner noise that is not actionable for this platform.
+
+# --- Noise: not actionable for an API/edge-fronted backend POC ---
+10096	IGNORE	Timestamp Disclosure — alpha rule, false-positives on numeric IDs
+10027	IGNORE	Information Disclosure: Suspicious Comments — noisy on vendored JS
+
+# --- Security headers: enforced at the edge (ADR-030); keep visible as WARN ---
+10020	WARN	Missing X-Frame-Options / anti-clickjacking header
+10021	WARN	X-Content-Type-Options header missing
+10038	WARN	Content Security Policy (CSP) header not set
+10063	WARN	Permissions-Policy header not set

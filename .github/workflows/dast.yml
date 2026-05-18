@@ -14,13 +14,14 @@
 #   - ADR-029 (SIEM) — DAST scan generates traffic Wazuh should classify as benign-test
 #
 # Skeleton — target URL placeholder; final URL configured in dev env.
-# Trigger: weekly Mondays 05:00 UTC, or manual dispatch.
+# Trigger: manual dispatch only. The scheduled run was removed because there
+# is no persistent dev environment for this POC — a weekly cron against an
+# unresolvable placeholder host produced guaranteed-red CI. Re-add the
+# `schedule:` block once a stable dev URL exists and is set as the default.
 
 name: DAST (OWASP ZAP)
 
 on:
-  schedule:
-    - cron: '0 5 * * 1'  # Mondays 05:00 UTC — runs after weekly CIS scan
   workflow_dispatch:
     inputs:
       target_url:
@@ -51,11 +52,32 @@ jobs:
             echo "url=https://aegis-statefulset-dev.example.com" >> "$GITHUB_OUTPUT"
           fi
 
+      # Reachability guard. action-baseline exits non-zero (code 3) when it
+      # cannot reach the target at all — `fail_action: false` only suppresses
+      # failures from findings, not an unreachable host. Without a persistent
+      # dev environment the default target is an unresolvable placeholder, so
+      # check DNS first and skip the scan cleanly rather than going red.
+      - name: Check target reachability
+        id: guard
+        run: |
+          set -euo pipefail
+          url='${{ steps.target.outputs.url }}'
+          host=$(printf '%s' "$url" | sed -E 's#^[a-zA-Z]+://##; s#[:/].*$##')
+          if getent hosts "$host" >/dev/null 2>&1; then
+            echo "reachable=true" >> "$GITHUB_OUTPUT"
+            echo "Target host '$host' resolves — proceeding with ZAP baseline scan."
+          else
+            echo "reachable=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Target host '$host' does not resolve — skipping ZAP scan." \
+                 "Re-run via workflow_dispatch with a reachable target_url."
+          fi
+
       # ZAP baseline scan: passive checks only (no active attack payloads).
       # Suitable for scheduled runs against a real dev environment without risk
       # of breaking it. For pre-prod we'd run zap-full-scan against a dedicated
       # ephemeral env — out of POC scope.
       - name: Run ZAP baseline
+        if: steps.guard.outputs.reachable == 'true'
         uses: zaproxy/action-baseline@1e1871e84428617b969d4a1f981a8255630d54b0  # v0.10.0 — SHA-pinned per ADR-09; refresh via Renovate
         with:
           target: ${{ steps.target.outputs.url }}
