@@ -53,10 +53,15 @@ if [[ "$MODE" == "staged" && -z "$FILES" ]]; then
 fi
 
 # Excluded paths — private context that legitimately contains brand
-# names; .git internals; build artefacts.
+# names; .git internals; build artefacts; gitignored local-only dirs.
+# `.claude` is Claude Code's local settings dir (gitignored in full) —
+# it can hold local env tokens, and since nothing under it is ever
+# committed, scanning it in whole-repo (--all) mode only produces false
+# positives that block pushes.
 EXCLUDE_DIRS=(
     "_context"
     ".claude-rules"
+    ".claude"
     ".git"
     "node_modules"
     ".terraform"
@@ -146,6 +151,7 @@ WAVE1_PATTERNS=(
 WAVE1_EXCLUDE=(
     "_context"
     ".claude-rules"
+    ".claude"
     ".git"
     "node_modules"
     ".terraform"
@@ -288,7 +294,7 @@ fi
 # has been source-verified. The check skips lines containing this marker.
 echo "${GREEN}[pre-commit] 5/5 — hallucination defense (claim attribution + free-floating quantitative)${NC}"
 
-HALLU_EXCLUDE=("_context" ".claude-rules" ".git" "node_modules" ".terraform" "vendor" ".venv")
+HALLU_EXCLUDE=("_context" ".claude-rules" ".claude" ".git" "node_modules" ".terraform" "vendor" ".venv")
 HALLU_INCLUDE_FLAGS=(--include='*.md')
 
 # BLOCK tier — specific patterns with low false-positive rate
