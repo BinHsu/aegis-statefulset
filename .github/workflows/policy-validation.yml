@@ -108,6 +108,16 @@ jobs:
           # without blocking the apply; Enforce blocks. CI applies the same
           # split — Audit-mode failures end up in `warn:`, Enforce-mode
           # failures end up in `fail:` and break the build.
+          # kyverno apply's CLI exit code behaviour: on Linux it exits 1 when
+          # there are warn results, even with --audit-warn (warn-on-audit is
+          # the point of the flag, but the CLI still wants to signal "not
+          # all clean"). That semantic is fine for a human; bad for a CI
+          # gate that wants to differentiate "Enforce violation = block" from
+          # "Audit violation = log". So: run without `set -e`, capture exit,
+          # and decide based on the report-file summary keys, not the CLI
+          # exit code or stdout. Redirected to file (no pipe) to keep
+          # pipefail out of the picture entirely.
+          set +e
           kyverno apply \
             gitops/policies/kyverno/cluster-policies/ \
             gitops/policies/kyverno/supply-chain/disallow-privileged.yaml \
@@ -115,24 +125,26 @@ jobs:
             --audit-warn \
             --policy-report \
             --output /tmp/policy-report.yaml \
-            | tee /tmp/kyverno-output.txt
-          # kyverno apply does not exit non-zero on validate failures by
-          # default — parse the summary line and fail the step explicitly
-          # so this gate behaves like an admission webhook.
-          summary=$(grep -E 'pass: [0-9]+, fail: [0-9]+' /tmp/kyverno-output.txt | tail -1)
-          fail=$(printf '%s' "$summary"  | grep -oE 'fail: [0-9]+'  | awk '{print $2}')
-          error=$(printf '%s' "$summary" | grep -oE 'error: [0-9]+' | awk '{print $2}')
-          warn=$(printf '%s' "$summary"  | grep -oE 'warn: [0-9]+'  | awk '{print $2}')
-          fail=${fail:-0}; error=${error:-0}; warn=${warn:-0}
-          echo "summary: fail=$fail error=$error warn=$warn"
+            > /tmp/kyverno-output.txt 2>&1
+          kv_exit=$?
+          set -e
+          # Parse the YAML summary block (`pass:`, `fail:`, `warn:`,
+          # `error:`, `skip:` — one per indented line).
+          fail=$(grep -E  '^[[:space:]]+fail:'  /tmp/kyverno-output.txt | tail -1 | awk '{print $2}')
+          error=$(grep -E '^[[:space:]]+error:' /tmp/kyverno-output.txt | tail -1 | awk '{print $2}')
+          warn=$(grep -E  '^[[:space:]]+warn:'  /tmp/kyverno-output.txt | tail -1 | awk '{print $2}')
+          pass=$(grep -E  '^[[:space:]]+pass:'  /tmp/kyverno-output.txt | tail -1 | awk '{print $2}')
+          fail=${fail:-0}; error=${error:-0}; warn=${warn:-0}; pass=${pass:-0}
+          echo "kyverno apply: pass=$pass fail=$fail warn=$warn error=$error (cli-exit=$kv_exit)"
           if [ "$warn" -gt 0 ]; then
-            echo "::warning::Kyverno: $warn audit-mode finding(s) (cluster would log, not block)."
+            echo "::warning::Kyverno: $warn audit-mode finding(s) (cluster admission would log, not block)."
           fi
           if [ "$fail" -gt 0 ] || [ "$error" -gt 0 ]; then
-            echo "::error::Kyverno apply reported $fail enforce failure(s) and $error error(s) against the rendered chart."
-            cat /tmp/policy-report.yaml
+            echo "::error::Kyverno apply: $fail enforce failure(s) and $error error(s) against the rendered chart."
+            sed -n '/^[[:space:]]\+result: fail/,/^- /p' /tmp/policy-report.yaml | head -40
             exit 1
           fi
+          # Pure pass / audit-warn only — green.
 
       - name: Upload Kyverno policy report
         if: always()
