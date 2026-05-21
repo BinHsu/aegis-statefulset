@@ -86,7 +86,7 @@ jobs:
           rules_file_name: '.zap-rules.tsv'
           # action-baseline opens a GitHub issue summarising findings; the
           # security label routes to the same triage queue as gitleaks /
-          # cis-benchmark / kyverno-deny-audit.
+          # policy-validation / kyverno-deny-audit.
           allow_issue_writing: true
           issue_title: 'DAST (ZAP) — weekly baseline findings'
           fail_action: false  # baseline findings are advisory at POC stage
