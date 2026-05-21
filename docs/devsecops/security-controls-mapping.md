@@ -94,7 +94,9 @@ Format: `Control` × `Framework reference(s)` × `Implemented?` × `Evidence poi
 
 ## High-priority CIS Kubernetes Benchmark controls
 
-Full benchmark scan runs weekly via `.github/workflows/cis-benchmark.yml`. The high-priority controls are tracked here as the policy evolves.
+Dynamic CIS Benchmark scanning is the live cluster's responsibility (an L4 control: `kube-bench` DaemonSet on EKS worker nodes, or AWS Security Hub's CIS Kubernetes standard for the managed control plane). It is deferred until the EKS cluster is back from teardown (backlog A24 — cold-apply). CI handles the L2 static side: `.github/workflows/policy-validation.yml` runs `kyverno apply` against rendered Helm output to fail-fast on the same `ClusterPolicy` rules the admission webhook would enforce.
+
+The high-priority controls below are tracked here as the policy evolves. Implementation column points to where each control lives (EKS launch template, IaC, Kyverno policy, etc.) rather than which workflow scans it.
 
 | CIS ID | Title | Implementation |
 |---|---|---|
@@ -152,7 +154,8 @@ This is not a "scan once, file the report" posture. Compliance evidence is gener
 | Mechanism | Cadence | What it produces |
 |---|---|---|
 | `pr-validation.yml` (Trivy + kubeconform + tflint + tfsec + anonymization gate) | Every PR | Build-time gate; failures block merge |
-| `cis-benchmark.yml` | Weekly | CIS findings report; FAIL items auto-open issues |
+| `policy-validation.yml` (Kyverno apply + kube-score) | Every PR + push to main | Static policy gate — same Kyverno policies the cluster enforces at admission, run against rendered Helm output; PR fails on Enforce-mode violations |
+| `kube-bench` DaemonSet on live EKS (post-A24) | Continuous | L4 dynamic CIS posture — node-level kubelet config + cluster controls on the actual cluster; findings flow to the SIEM (Wazuh) |
 | `dast.yml` (OWASP ZAP baseline) | Weekly | DAST findings report |
 | `secret-scanning.yml` (gitleaks + trufflehog) | Every PR + daily | Verified-secret detection |
 | `dr-drill.yml` | Quarterly | DR recovery path validation |

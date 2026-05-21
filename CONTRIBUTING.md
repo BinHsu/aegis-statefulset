@@ -100,8 +100,8 @@ Eleven workflows total — four primary plus seven supporting (per ADR-08):
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| `cis-benchmark.yml` | weekly cron + manual | CIS Kubernetes Benchmark scan against the deployed cluster (kube-bench) |
-| `dast.yml` | weekly cron + manual | Dynamic application security testing against the staging endpoint (OWASP ZAP) |
+| `policy-validation.yml` | PR + push to main + manual | L2 static check — `kyverno apply` validates rendered Helm output against the same `ClusterPolicy` YAMLs the cluster's admission webhook enforces (single source of truth); `kube-score` runs opinionated breadth checks. Dynamic CIS Benchmark scanning is an L4 responsibility on the live cluster (`kube-bench` DaemonSet / AWS Security Hub CIS K8s standard) — out of CI scope. |
+| `dast.yml` | manual dispatch | Dynamic application security testing against a reachable target (OWASP ZAP). DNS guard skips the scan when the target is unreachable. Re-add the weekly schedule once a stable dev environment URL exists. |
 | `sbom-attestation.yml` | every release | Generate CycloneDX SBOM, sign + attach to OCI artifact (in-toto provenance per SLSA v1.0) |
 | `secret-scanning.yml` | every PR + push to main | gitleaks scan for accidentally committed credentials (defense-in-depth alongside the pre-commit credential leak check) |
 | `codeql.yml` | PR + push to main | CodeQL static application security testing (SAST) for the Go workload — logic flaws the dependency scanners cannot see (ADR-07, ADR-09) |

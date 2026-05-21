@@ -1,0 +1,203 @@
+# Policy validation — L2 static check against the same Kyverno policies the
+# cluster enforces at admission (L3) + opinionated manifest scoring.
+#
+# Replaces the previous cis-benchmark.yml. Rationale: CIS Benchmark is a
+# dynamic posture check that belongs on the live cluster (L4 — kube-bench
+# DaemonSet on EKS nodes, or AWS Security Hub's CIS Kubernetes standard),
+# owned by the platform team. The old workflow ran kube-bench against an
+# ephemeral kind cluster in CI as a stand-in — but kind's kubelet config
+# does NOT represent EKS, and the workflow never installed this repo's
+# Helm chart or Kyverno policies, so the scan reported on kind defaults
+# rather than anything this repo actually ships. False-green theatre.
+#
+# This workflow does the L2 job properly:
+#   1. helm template — render the shipped chart
+#   2. kyverno apply — validate the rendered manifests against the SAME
+#      ClusterPolicy YAMLs the cluster's Kyverno webhook enforces at
+#      admission. Single source of truth: one policy, two enforcement
+#      points (PR-time fail-fast + admission-time block).
+#   3. kube-score — opinionated breadth checks (resource limits, probes,
+#      image tags, securityContext, anti-affinity) that the project's
+#      own Kyverno catalogue doesn't cover.
+#
+# Out of scope (handled elsewhere — documented to make the layering
+# explicit for reviewers):
+#   - Image signature / SBOM attestation verification — registry-side
+#     cosign checks, can't be meaningfully done from rendered YAML.
+#     Enforced by Kyverno verifyImages at admission (gitops/policies/
+#     kyverno/supply-chain/image-signature-required.yaml,
+#     sbom-required.yaml) and produced by sbom-attestation.yml at
+#     release time. Excluded from the CLI invocation below.
+#   - Worker-node CIS controls (kubelet flags, OS hardening) — owned by
+#     the EKS launch template / nodeadm config; verified post-A24 by a
+#     kube-bench DaemonSet on the actual cluster.
+#
+# Implements:
+#   - ADR-031 (Pod Security Standards + Kyverno) — same policies, two layers
+#   - NIST SSDF (SP 800-218) PS.3 — automated checks
+#   - OWASP CI/CD Top 10 CICD-SEC-1 (Insufficient Flow Control)
+#
+# Triggers: PR / push-to-main touching helm or kyverno policies, manual
+# dispatch. Fast (~15s); safe to run on every PR.
+
+name: Policy validation (Kyverno + kube-score)
+
+on:
+  pull_request:
+    paths:
+      - 'helm/**'
+      - 'gitops/policies/kyverno/**'
+      - '.github/workflows/policy-validation.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'helm/**'
+      - 'gitops/policies/kyverno/**'
+      - '.github/workflows/policy-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  KYVERNO_VERSION: v1.18.1
+  KUBE_SCORE_VERSION: v1.20.0
+  HELM_RELEASE: aegis
+  HELM_NAMESPACE: aegis-statefulset
+
+jobs:
+  kyverno-apply:
+    name: kyverno apply — same policies the cluster enforces
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Setup Helm
+        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2  # v5.0.0
+        with:
+          version: v3.14.0
+
+      - name: Install Kyverno CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            "https://github.com/kyverno/kyverno/releases/download/${KYVERNO_VERSION}/kyverno-cli_${KYVERNO_VERSION}_linux_x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin kyverno
+          kyverno version
+
+      - name: Render Helm chart
+        run: |
+          set -euo pipefail
+          helm template "$HELM_RELEASE" helm/aegis-statefulset \
+            --namespace "$HELM_NAMESPACE" \
+            > /tmp/rendered.yaml
+          echo "rendered $(wc -l < /tmp/rendered.yaml) lines"
+
+      - name: Kyverno apply (CLI-validatable policies)
+        run: |
+          set -euo pipefail
+          # verifyImages policies (image-signature-required.yaml,
+          # sbom-required.yaml) need a registry + cosign keyless context
+          # to be meaningful; they are enforced at admission against the
+          # actual image pull, not the manifest text. Excluded from CLI
+          # scope on purpose — see workflow header.
+          #
+          # `--audit-warn` mirrors what the cluster's admission webhook does:
+          # validationFailureAction=Audit emits a PolicyReport warning
+          # without blocking the apply; Enforce blocks. CI applies the same
+          # split — Audit-mode failures end up in `warn:`, Enforce-mode
+          # failures end up in `fail:` and break the build.
+          kyverno apply \
+            gitops/policies/kyverno/cluster-policies/ \
+            gitops/policies/kyverno/supply-chain/disallow-privileged.yaml \
+            --resource /tmp/rendered.yaml \
+            --audit-warn \
+            --policy-report \
+            --output /tmp/policy-report.yaml \
+            | tee /tmp/kyverno-output.txt
+          # kyverno apply does not exit non-zero on validate failures by
+          # default — parse the summary line and fail the step explicitly
+          # so this gate behaves like an admission webhook.
+          summary=$(grep -E 'pass: [0-9]+, fail: [0-9]+' /tmp/kyverno-output.txt | tail -1)
+          fail=$(printf '%s' "$summary"  | grep -oE 'fail: [0-9]+'  | awk '{print $2}')
+          error=$(printf '%s' "$summary" | grep -oE 'error: [0-9]+' | awk '{print $2}')
+          warn=$(printf '%s' "$summary"  | grep -oE 'warn: [0-9]+'  | awk '{print $2}')
+          fail=${fail:-0}; error=${error:-0}; warn=${warn:-0}
+          echo "summary: fail=$fail error=$error warn=$warn"
+          if [ "$warn" -gt 0 ]; then
+            echo "::warning::Kyverno: $warn audit-mode finding(s) (cluster would log, not block)."
+          fi
+          if [ "$fail" -gt 0 ] || [ "$error" -gt 0 ]; then
+            echo "::error::Kyverno apply reported $fail enforce failure(s) and $error error(s) against the rendered chart."
+            cat /tmp/policy-report.yaml
+            exit 1
+          fi
+
+      - name: Upload Kyverno policy report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: kyverno-policy-report
+          path: /tmp/policy-report.yaml
+          retention-days: 30
+          if-no-files-found: warn
+
+  kube-score:
+    name: kube-score — opinionated manifest scoring
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Setup Helm
+        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2  # v5.0.0
+        with:
+          version: v3.14.0
+
+      - name: Install kube-score
+        run: |
+          set -euo pipefail
+          ver_no_v=${KUBE_SCORE_VERSION#v}
+          curl -fsSL \
+            "https://github.com/zegl/kube-score/releases/download/${KUBE_SCORE_VERSION}/kube-score_${ver_no_v}_linux_amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin kube-score
+          kube-score version
+
+      - name: Render Helm chart
+        run: |
+          set -euo pipefail
+          helm template "$HELM_RELEASE" helm/aegis-statefulset \
+            --namespace "$HELM_NAMESPACE" \
+            > /tmp/rendered.yaml
+
+      - name: kube-score score (advisory)
+        run: |
+          set -euo pipefail
+          # Advisory mode this iteration. kube-score is opinionated by
+          # design — first run surfaces a baseline (~25 CRITICAL findings
+          # on the current chart: missing PDBs, missing readinessProbes,
+          # absent ephemeral-storage limits, low UID/GID, etc.). Many are
+          # real chart gaps, a few are defensible per project ADRs (digest-
+          # pinned images don't need ImagePullPolicy=Always per ADR-09).
+          # Tracked in BACKLOG C18 — triage findings, fix the real ones,
+          # add `--ignore-test` for the ADR-justified ones, then flip this
+          # step to blocking.
+          kube-score score /tmp/rendered.yaml --output-format ci \
+            | tee /tmp/kube-score.txt || true
+          critical=$(grep -c '^\[CRITICAL\]' /tmp/kube-score.txt || true)
+          warning=$(grep -c '^\[WARNING\]'  /tmp/kube-score.txt || true)
+          critical=${critical:-0}; warning=${warning:-0}
+          echo "kube-score: $critical CRITICAL, $warning WARNING (advisory)"
+          if [ "$critical" -gt 0 ] || [ "$warning" -gt 0 ]; then
+            echo "::warning::kube-score: $critical critical / $warning warning finding(s) — advisory only; see BACKLOG C18."
+          fi
+
+      - name: Upload kube-score report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: kube-score-report
+          path: /tmp/kube-score.txt
+          retention-days: 30
+          if-no-files-found: warn
