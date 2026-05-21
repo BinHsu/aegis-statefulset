@@ -42,7 +42,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
       # Resolve the image digest we are attesting. For tag pushes the chart is
       # published by helm-release.yml; here we accept a manual digest input or
@@ -63,7 +63,7 @@ jobs:
       # ADR-042: SBOM in CycloneDX format via syft.
       # syft generates CycloneDX 1.5 natively; emit JSON for cosign attestation.
       - name: Generate CycloneDX SBOM
-        uses: anchore/sbom-action@e8d2a6937ecead383dfe75190d104edd1f9c5751  # v0.15.10
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
         with:
           format: cyclonedx-json
           output-file: sbom.cdx.json
@@ -111,7 +111,7 @@ jobs:
       # (Dependency-Track, Anchore, etc.). 90d retention aligns with hot audit
       # log retention in ADR-044.
       - name: Upload SBOM as workflow artifact
-        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3  # v4.3.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: sbom-cyclonedx
           path: sbom.cdx.json
