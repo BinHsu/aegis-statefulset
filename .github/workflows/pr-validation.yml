@@ -41,7 +41,18 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Dependabot pull requests receive no repository secrets, so this gate
+          # fails closed on every one of them and reports a missing secret, which
+          # reads like a configuration error and is not. Skip it there instead:
+          # Dependabot only edits dependency manifests and pinned action
+          # versions, so it has no way to introduce the private name into prose.
+          # Every other event keeps failing closed — an unset secret on a human
+          # pull request is still an error.
           if [ -z "${PRIVATE_NAME:-}" ]; then
+            if [ "${GITHUB_ACTOR}" = "dependabot[bot]" ]; then
+              echo "::notice::COMPANY_PRIVATE_NAME is unavailable on Dependabot pull requests; the anonymization gate is skipped for this event."
+              exit 0
+            fi
             echo "::error::COMPANY_PRIVATE_NAME secret is not set. See ADR-035."
             exit 1
           fi

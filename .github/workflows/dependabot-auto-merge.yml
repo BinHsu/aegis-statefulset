@@ -20,12 +20,17 @@ jobs:
         id: meta
         uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a # v2.5.0
 
-      - name: Approve and enable auto-merge (patch + minor only)
+      # No `gh pr review --approve` here. GitHub refuses it — "GitHub Actions is
+      # not permitted to approve pull requests" — unless the repository opts in
+      # to letting Actions approve, which would let this workflow satisfy the
+      # branch ruleset's review requirement by itself. That opt-in is a decision
+      # about review integrity, not a CI detail, so the job enables auto-merge
+      # and waits for a real approval instead of failing on a forbidden call.
+      - name: Enable auto-merge (patch + minor only)
         if: >-
           steps.meta.outputs.update-type == 'version-update:semver-patch' ||
           steps.meta.outputs.update-type == 'version-update:semver-minor'
         run: |
-          gh pr review --approve "$PR_URL"
           gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
